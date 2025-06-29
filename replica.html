@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Replica with AI Opponent</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; padding-top: 40px; }
+    #startup {
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(0,0,0,0.8); display: flex;
+      align-items: center; justify-content: center; flex-direction: column;
+      color: white; z-index: 1000;
+    }
+    #startup button { margin: 10px; padding: 10px 20px; font-size: 18px; cursor: pointer; }
+    #status { margin: 10px; font-weight: bold; }
+    #board-container { display: inline-block; transform: rotate(-45deg); transform-origin: center center; margin-top: 20px; }
+    table.board { border-collapse: collapse; }
+    .board td { width: 60px; height: 60px; text-align: center; vertical-align: middle; position: relative; }
+    .light { background: #f0d9b5; }
+    .dark  { background: #b58863; }
+    .piece { display: inline-block; width: 80%; height: 80%; border-radius: 50%; line-height: 60px; cursor: pointer; position: relative; transform: rotate(45deg); }
+    .white { background: #fff; }
+    .black { background: #000; }
+    .king::after { content: "★"; position: absolute; top: 0; left: 0; font-size: 24px; color: gold; }
+    .highlight-step      { outline: 3px solid green; }
+    .highlight-jump      { outline: 3px solid blue; }
+    .highlight-transform { outline: 3px solid orange; }
+  </style>
+</head>
+<body>
+  <div id="startup">
+    <h2>Choose Game Mode</h2>
+    <button id="hvh">Human vs Human</button>
+    <button id="hmcts">Human vs MCTS</button>
+    <button id="hrandom">Human vs Random</button>
+  </div>
+  <h1>Replica</h1>
+  <div id="status">White to move</div>
+  <div id="board-container">
+    <table class="board" id="board"></table>
+  </div>
+  <script>
+    const N = 8;
+    const dirs = { white: [[-1,0],[0,1],[-1,1]], black: [[1,0],[0,-1],[1,-1]] };
+    let board = [], turn = 'white', selected = null, moves = {};
+    let gameMode = 'hvh', gameOver = false;
+
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('hvh').onclick = () => start('hvh');
+      document.getElementById('hmcts').onclick = () => start('hmcts');
+      document.getElementById('hrandom').onclick = () => start('hrandom');
+    });
+
+    function start(mode) { gameMode = mode; document.getElementById('startup').style.display = 'none'; init(); render(); }
+    function inBounds(r,c) { return r>=0 && r<N && c>=0 && c<N; }
+    function init() {
+      board = Array.from({length:N},()=>Array(N).fill(null));
+      const add = (r,c,color,king=false)=> board[r][c]={color,king};
+      [[0,7,true],[0,6],[1,7],[1,6],[0,5],[0,4],[1,5],[1,4],[2,7],[2,6],[3,7],[3,6]]
+        .forEach(a=>add(a[0],a[1],'black',!!a[2]));
+      [[7,0,true],[7,1],[6,0],[6,1],[7,2],[7,3],[6,2],[6,3],[5,0],[5,1],[4,0],[4,1]]
+        .forEach(a=>add(a[0],a[1],'white',!!a[2]));
+      turn='white'; selected=null; gameOver=false; clearHighlights();
+    }
+
+    function render() {
+      const tbl=document.getElementById('board'); tbl.innerHTML='';
+      for(let r=0;r<N;r++){
+        const tr=tbl.insertRow();
+        for(let c=0;c<N;c++){
+          const td=tr.insertCell(); td.className=((r+c)&1)?'dark':'light'; td.dataset.r=r; td.dataset.c=c;
+          const p=board[r][c];
+          if(p){
+            const el=document.createElement('div');
+            el.className=`piece ${p.color}${p.king?' king':''}`;
+            el.onclick=e=>{ e.stopPropagation(); if(gameOver) return; if(selected) destClick(r,c); else select(r,c); };
+            td.appendChild(el);
+          }
+          td.onclick=()=>{ if(!gameOver) destClick(r,c); };
+        }
+      }
+      document.getElementById('status').textContent = gameOver ? 'Game Over' : `${turn.charAt(0).toUpperCase()+turn.slice(1)} to move`;
+      if(!gameOver && turn==='black' && (gameMode==='hmcts'||gameMode==='hrandom')) setTimeout(aiMove,200);
+    }
+
+    function compute(r,c,state=board){
+      const p=state[r][c], d=dirs[p.color]; let S=[],J=[],T=[];
+      d.forEach(([dr,dc])=>{ const nr=r+dr, nc=c+dc; if(inBounds(nr,nc)) S.push([nr,nc]); });
+      d.forEach(([dr,dc])=>{ let k=1; while(true){ const rr=r+dr*k, cc=c+dc*k; if(!inBounds(rr,cc)) break; if(state[rr][cc]&&state[rr][cc].color===p.color){k++;continue;} if(k>1) J.push([rr,cc]); break;} });
+      if(p.king){ d.forEach(([dr,dc])=>{ for(let k=1;;k++){ const rr=r+dr*k, cc=c+dc*k; if(!inBounds(rr,cc)) break; const q=state[rr][cc]; if(q){ if(q.color===p.color&&!q.king) T.push([rr,cc]); if(q.color!==p.color) break; } }}); }
+      return {S,J,T};
+    }
+
+    function clearHighlights(){
+      document.querySelectorAll('.highlight-step,.highlight-jump,.highlight-transform')
+        .forEach(td=>td.classList.remove('highlight-step','highlight-jump','highlight-transform'));
+    }
+
+    function select(r,c){ if(selected||!board[r][c]||board[r][c].color!==turn) return; selected=[r,c]; moves=compute(r,c); moves.S.forEach(([r2,c2])=>cell(r2,c2).classList.add('highlight-step')); moves.J.forEach(([r2,c2])=>cell(r2,c2).classList.add('highlight-jump')); moves.T.forEach(([r2,c2])=>cell(r2,c2).classList.add('highlight-transform')); }
+
+    function cell(r,c){ return document.querySelector(`td[data-r='${r}'][data-c='${c}']`); }
+
+    function destClick(r,c){
+      if(!selected) return; const [r0,c0]=selected, p=board[r0][c0];
+      let action = moves.T.some(x=>x[0]===r&&x[1]===c)?'transform'
+                : moves.S.some(x=>x[0]===r&&x[1]===c)?'step'
+                : moves.J.some(x=>x[0]===r&&x[1]===c)?'jump'
+                : null;
+      if(!action){ clearHighlights(); selected=null; return; }
+      if(action==='transform'){
+        board[r][c].king=true;
+      } else {
+        const dest=board[r][c];
+        // disallow capturing your own king
+        if(dest && dest.color===turn && dest.king){ clearHighlights(); selected=null; return; }
+        if(dest && dest.king){ alert(`${turn} wins!`); gameOver=true; render(); return; }
+        board[r][c]=p; board[r0][c0]=null;
+        const target = turn==='white'? [0,7] : [7,0];
+        if(p.king && r===target[0] && c===target[1]){ alert(`${turn} wins!`); gameOver=true; render(); return; }
+      }
+      clearHighlights(); selected=null; turn=turn==='white'?'black':'white'; render();
+    }
+
+    // AI logic unchanged...
+    function aiMove(){ if(gameOver) return; let move=gameMode==='hrandom'?randomMove(turn):mctsMove(turn,50); if(move) applyMove(move); render(); }
+    function randomMove(color){const list=allMoves(color);return list.length?list[Math.floor(Math.random()*list.length)]:null;}
+    function mctsMove(color,sims){const list=allMoves(color); if(!list.length) return null; let best=list[0],bestScore=-Infinity; list.forEach(m=>{let wins=0;for(let i=0;i<sims;i++) if(simulate(m,color)) wins++; if(wins>bestScore){bestScore=wins;best=m;}});return best;}
+    function applyMove(m){const p=board[m.r0][m.c0]; if(m.action==='transform') board[m.r1][m.c1].king=true; else{board[m.r1][m.c1]=p;board[m.r0][m.c0]=null;} turn=turn==='white'?'black':'white';}
+    function allMoves(color,state=board){let list=[];for(let r=0;r<N;r++)for(let c=0;c<N;c++){const p=state[r][c];if(!p||p.color!==color)continue;const {S,J,T}=compute(r,c,state);S.forEach(([r2,c2])=>list.push({r0:r,c0:c,r1:r2,c1:c2,action:'step'}));J.forEach(([r2,c2])=>list.push({r0:r,c0:c,r1:r2,c1:c2,action:'jump'}));T.forEach(([r2,c2])=>list.push({r0:r,c0:c,r1:r2,c1:c2,action:'transform'}));}return list;}
+    function simulate(m,color){let sim=board.map(r=>r.map(c=>c?{...c}:null)),turnSim=color;applySim(m,sim);turnSim=turnSim==='white'?'black':'white';for(let d=0;d<100;d++){const list=allMoves(turnSim,sim);if(!list.length)break;const m2=list[Math.floor(Math.random()*list.length)];applySim(m2,sim);turnSim=turnSim==='white'?'black':'white';}return turnSim!==color;}
+    function applySim(m,state){const p=state[m.r0][m.c0];if(m.action==='transform')state[m.r1][m.c1].king=true;else{state[m.r1][m.c1]=p;state[m.r0][m.c0]=null;}}
+  </script>
+</body>
+</html>
