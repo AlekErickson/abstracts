@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Not-Largest Freezers</title>
+  <style>
+    body { display: flex; flex-direction: column; align-items: center; font-family: sans-serif; }
+    #settings { margin-top: 20px; }
+    #settings label { margin-right: 15px; }
+    #board { display: grid; grid-template: repeat(8, 50px) / repeat(8, 50px); gap: 1px; background: #333; margin-top: 20px; }
+    .cell { width: 50px; height: 50px; background: #d2b48c; display: flex; justify-content: center; align-items: center; cursor: pointer; }
+    .stone { width: 40px; height: 40px; border-radius: 50%; }
+    .black { background: black; }
+    .white { background: white; }
+    .legal { outline: 3px solid lime; }
+    #info, #message { margin-top: 10px; }
+    #message { color: red; height: 1.2em; }
+  </style>
+</head>
+<body>
+  <h1>Not-Largest Freezers</h1>
+  <div id="settings">
+    <label><input type="radio" name="mode" value="pvp" checked> Player vs Player</label>
+    <label><input type="radio" name="mode" value="random"> Vs Random Opponent</label>
+    <label><input type="radio" name="mode" value="mcts"> Vs MCTS Opponent</label>
+    <button id="startBtn">Start Game</button>
+  </div>
+  <div id="info" style="display:none;">Turn: <span id="turn">Black</span></div>
+  <div id="board"></div>
+  <div id="message"></div>
+
+  <script>
+    const N = 8;
+    let board, turn, mode, gameOver;
+    const boardEl = document.getElementById('board');
+
+    document.getElementById('startBtn').onclick = () => {
+      mode = document.querySelector('input[name="mode"]:checked').value;
+      document.getElementById('settings').style.display = 'none';
+      document.getElementById('info').style.display = 'block';
+      init();
+    };
+
+    function init() {
+      board = Array.from({ length: N }, () => Array(N).fill(null));
+      turn = 'black';
+      gameOver = false;
+      document.getElementById('turn').textContent = turn;
+      document.getElementById('message').textContent = '';
+      boardEl.innerHTML = '';
+      for (let y = 0; y < N; y++) {
+        for (let x = 0; x < N; x++) {
+          const cell = document.createElement('div');
+          cell.className = 'cell';
+          cell.dataset.x = x;
+          cell.dataset.y = y;
+          cell.addEventListener('click', onClick);
+          boardEl.appendChild(cell);
+        }
+      }
+      highlight();
+      if ((mode === 'random' || mode === 'mcts') && turn === 'white') setTimeout(aiMove, 300);
+    }
+
+    function onClick(e) {
+      if (gameOver || (turn === 'white' && mode !== 'pvp')) return;
+      const x = +e.currentTarget.dataset.x;
+      const y = +e.currentTarget.dataset.y;
+      if (board[y][x]) return;
+      const legal = computeLegalMoves(board, turn);
+      if (!legal.some(([a, b]) => a === x && b === y)) return;
+      makeMove(x, y);
+      if (!gameOver && (mode === 'random' || mode === 'mcts') && turn === 'white') setTimeout(aiMove, 300);
+    }
+
+    function makeMove(x, y) {
+      board[y][x] = turn;
+      const dot = document.createElement('div');
+      dot.className = `stone ${turn}`;
+      boardEl.children[y * N + x].appendChild(dot);
+      turn = turn === 'black' ? 'white' : 'black';
+      document.getElementById('turn').textContent = turn;
+      highlight();
+      const next = computeLegalMoves(board, turn);
+      if (next.length === 0) {
+        document.getElementById('message').textContent = `${turn} has no moves — ${turn} loses!`;
+        gameOver = true;
+      }
+    }
+
+    function aiMove() {
+      const legal = computeLegalMoves(board, 'white');
+      if (!legal.length) return;
+      let move;
+      if (mode === 'random') move = legal[Math.floor(Math.random() * legal.length)];
+      else move = mctsSelect(board, 'white', 200);
+      makeMove(move[0], move[1]);
+    }
+
+    // Compute legal moves under "Not-Largest" rules
+    function computeLegalMoves(bd, c) {
+      // 1) Singleton rule
+      const empties = [];
+      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (!bd[y][x]) empties.push([x, y]);
+      const singles = empties.filter(([x, y]) => neighbors(x, y).every(([nx, ny]) => !bd[ny][nx]));
+      if (singles.length) return singles;
+
+      // 2) Unfrozen groups
+      const groups = allGroups(bd, c).filter(g => !isFrozen(bd, g, c));
+      if (!groups.length) return [];
+
+      // 3) Sizes
+      const sizes = groups.map(g => g.length);
+      const maxSize = Math.max(...sizes);
+      const allEqual = new Set(sizes).size === 1;
+      const nonLargest = groups.filter(g => g.length < maxSize);
+
+      // 4) Select groups
+      let selectable;
+      if (allEqual) {
+        selectable = groups;
+      } else {
+        // non-largest if any have moves, else largest
+        const canNL = nonLargest.filter(g => adjacentMoves(bd, c, g, maxSize).length > 0);
+        selectable = canNL.length ? canNL : groups.filter(g => g.length === maxSize);
+      }
+
+      // 5) Collect moves
+      let moves = [];
+      for (const g of selectable) {
+        moves.push(...adjacentMoves(bd, c, g, maxSize));
+      }
+
+      // 6) Dedupe
+      return Array.from(new Set(moves.map(m => m.join(',')))).map(s => s.split(',').map(Number));
+    }
+
+    // Get adjacent empties, forbidding touching largest except as last resort for that group
+    function adjacentMoves(bd, c, group, maxSize) {
+      const neigh = [];
+      for (const [x, y] of group) for (const [nx, ny] of neighbors(x, y)) if (!bd[ny][nx]) neigh.push([nx, ny]);
+      const normal = [], mergeBig = [];
+      for (const [nx, ny] of neigh) {
+        let touchesBig = false;
+        for (const [qx, qy] of neighbors(nx, ny)) {
+          if (bd[qy][qx] === c && flood(bd, qx, qy, c).length === maxSize) touchesBig = true;
+        }
+        if (touchesBig) mergeBig.push([nx, ny]); else normal.push([nx, ny]);
+      }
+      return normal.length ? normal : mergeBig;
+    }
+
+    // Simulation uses same logic
+    function computeLegalMovesSim(bd, c) { return computeLegalMoves(bd, c); }
+
+    // Helpers
+    function neighbors(x, y) {
+      return [[1,0],[-1,0],[0,1],[0,-1]]
+        .map(d => [x + d[0], y + d[1]])
+        .filter(([x2, y2]) => x2 >= 0 && x2 < N && y2 >= 0 && y2 < N);
+    }
+    function flood(bd, x, y, c, seen = new Set()) {
+      const key = `${x},${y}`;
+      if (x < 0||x >= N||y < 0||y >= N||bd[y][x] !== c||seen.has(key)) return [];
+      seen.add(key);
+      let pts = [[x, y]];
+      for (const [nx, ny] of neighbors(x, y)) pts = pts.concat(flood(bd, nx, ny, c, seen));
+      return pts;
+    }
+    function allGroups(bd, c) {
+      const seen = new Set(), gs = [];
+      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+        const k = `${x},${y}`;
+        if (bd[y][x] === c && !seen.has(k)) {
+          const g = flood(bd, x, y, c);
+          g.forEach(p => seen.add(`${p[0]},${p[1]}`));
+          gs.push(g);
+        }
+      }
+      return gs;
+    }
+    function isFrozen(bd, g, c) {
+      const opp = c === 'black' ? 'white' : 'black';
+      for (const [x, y] of g) for (const [nx, ny] of neighbors(x, y)) {
+        if (bd[ny][nx] === opp) {
+          const eg = flood(bd, nx, ny, opp);
+          if (eg.length > g.length) return true;
+        }
+      }
+      return false;
+    }
+
+    // MCTS (using pure random playouts)
+    function mctsSelect(root, c, iter) {
+      const moves = computeLegalMoves(root, c);
+      const stats = moves.map(pt => ({ pt, w: 0, n: 0 }));
+      let total = 0;
+      for (let i = 0; i < iter; i++) {
+        let best = null, bestU = -Infinity;
+        for (const s of stats) {
+          const u = s.n === 0 ? Infinity : (s.w/s.n + Math.sqrt(2 * Math.log(total) / s.n));
+          if (u > bestU) { bestU = u; best = s; }
+        }
+        const win = simulate(root, c, best.pt);
+        best.n++; if (win) best.w++;
+        total++;
+      }
+      stats.sort((a, b) => (b.w/b.n) - (a.w/a.n));
+      return stats[0].pt;
+    }
+    function simulate(orig, c, move) {
+      const bd = orig.map(r => r.slice());
+      bd[move[1]][move[0]] = c;
+      let turn = c === 'white' ? 'black' : 'white';
+      while (true) {
+        const L = computeLegalMovesSim(bd, turn);
+        if (L.length === 0) return turn !== c;
+        const m = L[Math.floor(Math.random() * L.length)];
+        bd[m[1]][m[0]] = turn;
+        turn = turn === 'white' ? 'black' : 'white';
+      }
+    }
+
+    // Highlight legal moves
+    function highlight() {
+      for (const cell of boardEl.children) cell.classList.remove('legal');
+      for (const [x, y] of computeLegalMoves(board, turn)) {
+        boardEl.children[y * N + x].classList.add('legal');
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
