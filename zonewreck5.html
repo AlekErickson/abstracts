@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Zone Wreck</title>
+  <style>
+    body { font-family: sans-serif; background: #eef; }
+    .board { display: grid; grid-template: repeat(8, 75px) / repeat(8, 75px); gap: 2px; }
+    .cell {
+      width: 75px; height: 75px; background: #fcfcfa; border: 1px solid #bbb;
+      display: flex; align-items: center; justify-content: center; cursor: pointer; position: relative;
+      font-size: 2.2em;
+    }
+    .zone-white { box-shadow: 0 0 0 4px #b4e8ff inset; }
+    .zone-black { box-shadow: 0 0 0 4px #dabfff inset; }
+    .selected { outline: 4px solid #00a; z-index: 2;}
+    .piece-white {
+      background: #fff;
+      color: #111;
+      border: 3px solid #222;
+      border-radius: 50%;
+      font-weight: bold;
+      padding: 4px 10px;
+      box-shadow: 0 2px 10px #bbb6;
+    }
+    .piece-black {
+      background: #111;
+      color: #fff;
+      border: 3px solid #222;
+      border-radius: 50%;
+      font-weight: bold;
+      padding: 4px 10px;
+      box-shadow: 0 2px 10px #2228;
+    }
+    .piece-p1 { font-size: 0.93em;}
+    .piece-p2 { font-size: 1.15em;}
+    .piece-p3 { font-size: 1.25em;}
+    .piece-p4 { font-size: 1.38em;}
+    .piece-p5 { font-size: 1.65em;}
+    #panel { margin-bottom: 1em; }
+    #panel span { margin-right: 30px; }
+    #reserve-bar { display: flex; gap: 2em; margin-top: 1em; }
+    #piece-picker { margin: 1em 0; }
+    .statinput { width: 2em; }
+    .err { color: #b00; }
+    #ai-toggle { margin: 10px 0; font-size: 1em; }
+  </style>
+</head>
+<body>
+  <h1>Zone Wreck</h1>
+  <div id="panel">
+    <span id="turn"></span>
+    <span id="winner" style="font-weight: bold;"></span>
+  </div>
+  <div id="reserve-bar">
+    <span id="white-reserve"></span>
+    <span id="black-reserve"></span>
+  </div>
+  <div>
+    <button id="ai-toggle">Play vs Random Black: OFF</button>
+  </div>
+  <div id="piece-picker"></div>
+  <div id="inventory"></div>
+  <div id="board" class="board"></div>
+  <div id="actions"></div>
+  <div class="err" id="error"></div>
+  <script>
+    // ==== Rules Engine ====
+    const BOARD_SIZE = 8;
+    const PIECE_TYPES = [
+      {name: "Spot",   P: 1, symbol: "•"},
+      {name: "Circle", P: 2, symbol: "◯"},
+      {name: "Triangle", P: 3, symbol: "▲"},
+      {name: "Square", P: 4, symbol: "■"},
+      {name: "Star",   P: 5, symbol: "★"}
+    ];
+    class Piece {
+      constructor(owner, type, stats, pos) {
+        this.owner = owner;
+        this.type = type;
+        this.stats = {...stats};
+        this.pos = pos;
+        this.alive = true;
+      }
+    }
+    function inZone(player, row) {
+      if (player === "white") return row === BOARD_SIZE - 1;
+      else return row === 0;
+    }
+    function inEnemyZone(player, row) {
+      if (player === "white") return row === 0;
+      else return row === BOARD_SIZE - 1;
+    }
+    function isTowardEnemy(player, from, to) {
+      if (player === "white") return to[0] < from[0];
+      else return to[0] > from[0];
+    }
+    function isStraightLine(from, to) {
+      let dr = to[0] - from[0];
+      let dc = to[1] - from[1];
+      return (dr === 0 || dc === 0 || Math.abs(dr) === Math.abs(dc));
+    }
+    class ZoneWreckGame {
+      constructor() {
+        this.board = Array.from({length: BOARD_SIZE}, () =>
+          Array.from({length: BOARD_SIZE}, () => null));
+        this.reserves = { white: 141, black: 141 };
+        this.pieceInventory = {
+          white: [
+            {...PIECE_TYPES[0], count: 5},
+            {...PIECE_TYPES[1], count: 4},
+            {...PIECE_TYPES[2], count: 3},
+            {...PIECE_TYPES[3], count: 2},
+            {...PIECE_TYPES[4], count: 1}
+          ],
+          black: [
+            {...PIECE_TYPES[0], count: 5},
+            {...PIECE_TYPES[1], count: 4},
+            {...PIECE_TYPES[2], count: 3},
+            {...PIECE_TYPES[3], count: 2},
+            {...PIECE_TYPES[4], count: 1}
+          ]
+        };
+        this.pieces = [];
+        this.turn = "white";
+        this.winner = null;
+      }
+      getSmallestPInReserve(player) {
+        for (let t of PIECE_TYPES) {
+          if (this.pieceInventory[player].find(x => x.P === t.P && x.count > 0)) return t.P;
+        }
+        return null;
+      }
+      canPlacePiece(player) {
+        let P = this.getSmallestPInReserve(player);
+        if (P == null) return false;
+        let zoneRow = player === "white" ? BOARD_SIZE - 1 : 0;
+        for (let c = 0; c < BOARD_SIZE; ++c)
+          if (!this.board[zoneRow][c]) return true;
+        return false;
+      }
+      placePiece(player, pos, stats) {
+        if (this.winner) throw "Game is over";
+        let [r, c] = pos;
+        if (!inZone(player, r)) throw "Must place in your back rank";
+        if (this.board[r][c]) throw "Square not empty";
+        let P = this.getSmallestPInReserve(player);
+        let type = PIECE_TYPES.find(x => x.P === P);
+        let statSum = stats.A + stats.H + stats.S + stats.D;
+        if (statSum > 4*P) throw `Too many stat points (max ${4*P})`;
+        if (this.reserves[player] < statSum) throw "Not enough points in reserve";
+        let invPiece = this.pieceInventory[player].find(x => x.P === P);
+        if (invPiece.count <= 0) throw "No pieces of this type left";
+        invPiece.count--;
+        this.reserves[player] -= statSum;
+        let piece = new Piece(player, type, stats, [r, c]);
+        this.board[r][c] = piece;
+        this.pieces.push(piece);
+        this.checkWin();
+        return piece;
+      }
+      getMovablePieces(player) {
+        return this.pieces.filter(p => p.owner === player && p.alive);
+      }
+      canMoveAnyPiece(player) {
+        for (let piece of this.getMovablePieces(player)) {
+          if (this.getValidMoves(piece).length > 0 || this.canAttackEnemyReserve(piece)) {
+            return true;
+          }
+        }
+        return false;
+      }
+      getValidMoves(piece) {
+        let moves = [];
+        if (!piece.alive) return moves;
+        let [r, c] = piece.pos;
+        let dirs = [
+          [-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]
+        ];
+        for (let [dr, dc] of dirs) {
+          for (let d = 1; d <= piece.stats.D; ++d) {
+            let nr = r + dr*d, nc = c + dc*d;
+            if (nr < 0 || nr >= BOARD_SIZE || nc < 0 || nc >= BOARD_SIZE) break;
+            if (!isStraightLine([r,c], [nr,nc])) continue;
+            let dest = this.board[nr][nc];
+            if (dest) {
+              if (dest.owner !== piece.owner) moves.push({to:[nr,nc],type:"attackPiece"});
+              break; // stop ray on first occupied square
+            } else {
+              if (inEnemyZone(piece.owner, nr)) {
+                moves.push({to:[nr,nc],type:"attackReserve"});
+                break; // entering enemy zone ends movement
+              } else {
+                // For empty, non-enemy-zone moves, must be toward enemy
+                if (isTowardEnemy(piece.owner, [r,c], [nr,nc])) {
+                  moves.push({to:[nr,nc],type:"move"});
+                }
+              }
+            }
+          }
+        }
+        return moves;
+      }
+      canAttackEnemyReserve(piece) {
+        let [r, c] = piece.pos;
+        return piece.alive && inEnemyZone(piece.owner, r);
+      }
+      movePiece(piece, dest) {
+        if (this.winner) throw "Game is over";
+        let [nr, nc] = dest;
+        let [r, c] = piece.pos;
+        let validMoves = this.getValidMoves(piece);
+        let move = validMoves.find(m => m.to[0] === nr && m.to[1] === nc);
+        if (!move) throw "Invalid move";
+        if (move.type === "move") {
+          this.board[r][c] = null; this.board[nr][nc] = piece; piece.pos = [nr,nc];
+        } else if (move.type === "attackReserve") {
+          this.board[r][c] = null; this.board[nr][nc] = piece; piece.pos = [nr,nc];
+          this.reserves[this.enemyOf(piece.owner)] -= piece.stats.A; this.checkWin();
+        } else if (move.type === "attackPiece") {
+          let defender = this.board[nr][nc];
+          this.resolveMortalCombat(piece, defender);
+          if (!piece.alive) this.board[r][c] = null;
+          if (!defender.alive) this.board[nr][nc] = null;
+          if (piece.alive) { this.board[nr][nc] = piece; this.board[r][c] = null; piece.pos = [nr,nc]; }
+        }
+        this.checkWin();
+      }
+      attackEnemyReserve(piece) {
+        if (this.winner) throw "Game is over";
+        let [r, c] = piece.pos;
+        if (!inEnemyZone(piece.owner, r)) throw "Not in enemy zone";
+        this.reserves[this.enemyOf(piece.owner)] -= piece.stats.A;
+        this.checkWin();
+      }
+      resolveMortalCombat(p1, p2) {
+        let order = [];
+        if (p1.stats.S > p2.stats.S) order = [p1, p2];
+        else if (p1.stats.S < p2.stats.S) order = [p2, p1];
+        else order = [p1, p2];
+        while (p1.alive && p2.alive) {
+          let attacker = order[0], defender = order[1];
+          defender.stats.H -= attacker.stats.A;
+          if (defender.stats.H <= 0) defender.alive = false;
+          order.reverse();
+        }
+      }
+      enemyOf(player) { return player === "white" ? "black" : "white"; }
+      checkWin() {
+        if (this.reserves.white <= 0) this.winner = "black";
+        if (this.reserves.black <= 0) this.winner = "white";
+      }
+      canPlayerAct(player) {
+        return this.canPlacePiece(player) || this.canMoveAnyPiece(player);
+      }
+    }
+
+    // ========== UI STATE ==========
+
+    let game = new ZoneWreckGame();
+    let state = {
+      phase: null, // "place", "move", or null
+      hasPlaced: false,
+      hasMoved: false,
+      selectedPiece: null,
+      moveList: [],
+      placeStats: {},
+      error: '',
+      ai: false
+    };
+
+    document.getElementById("ai-toggle").onclick = function() {
+      state.ai = !state.ai;
+      this.textContent = "Play vs Random Black: " + (state.ai ? "ON" : "OFF");
+      updateUI();
+      if (state.ai && game.turn === "black" && !game.winner) {
+        setTimeout(doRandomAIMove, 500);
+      }
+    };
+
+    function updateUI() {
+      // Failsafe: If can't place and can't move, end turn automatically
+      if (!game.winner) {
+        let canPlace = game.canPlacePiece(game.turn);
+        let canMove = game.canMoveAnyPiece(game.turn);
+
+        if (!state.hasPlaced && !canPlace && !canMove) {
+          setTimeout(endTurn, 300);
+          return;
+        }
+        if (!state.hasPlaced && !canPlace) state.hasPlaced = true;
+        if (!state.hasPlaced && canPlace) {
+          if (state.phase !== "place") {
+            let P = game.getSmallestPInReserve(game.turn);
+            state.placeStats = {A: P, H: P, S: P, D: P};
+          }
+          state.phase = "place";
+        } else {
+          state.phase = "move";
+        }
+      } else {
+        state.phase = null;
+      }
+
+      document.getElementById("turn").textContent = "Turn: " + game.turn.toUpperCase();
+      document.getElementById("white-reserve").textContent = `White reserve: ${game.reserves.white}`;
+      document.getElementById("black-reserve").textContent = `Black reserve: ${game.reserves[game.turn === "white" ? "black" : "white"]}`;
+      document.getElementById("winner").textContent = game.winner ? (game.winner.toUpperCase() + " wins!") : '';
+      document.getElementById("error").textContent = state.error || '';
+
+      // Piece picker
+      let picker = document.getElementById("piece-picker");
+      if (state.phase === "place") {
+        let P = game.getSmallestPInReserve(game.turn);
+        let type = PIECE_TYPES.find(x => x.P === P);
+        let inv = game.pieceInventory[game.turn].find(t => t.P === P);
+        picker.innerHTML = `<b>Place: <span class="piece-${game.turn} piece-p${P}">${type.symbol}</span> <span style="font-size:80%">(${type.name}, P=${P}, left: ${inv.count})</span></b>
+        <br>Assign stats (max ${4*P}, reserve ${game.reserves[game.turn]}): 
+        A <input class="statinput" id="statA" value="${state.placeStats.A}">
+        H <input class="statinput" id="statH" value="${state.placeStats.H}">
+        S <input class="statinput" id="statS" value="${state.placeStats.S}">
+        D <input class="statinput" id="statD" value="${state.placeStats.D}">
+        <button id="place-btn">Pick square to place</button>`;
+
+        ["A","H","S","D"].forEach(l => {
+          document.getElementById("stat"+l).oninput = e=> {
+            state.placeStats[l] = +e.target.value;
+          }
+        });
+        document.getElementById("place-btn").onclick = ()=> {
+          state.phase = "place";
+          state.selectedPiece = null;
+          state.error = '';
+          updateUI();
+        }
+      } else {
+        picker.innerHTML = '';
+      }
+
+      // Piece inventory display
+      let invDiv = document.getElementById("inventory");
+      invDiv.innerHTML = `<b>White:</b> ${renderInv("white")}<br><b>Black:</b> ${renderInv("black")}`;
+
+      // Board
+      let board = document.getElementById("board");
+      board.innerHTML = '';
+      for (let r = 0; r < BOARD_SIZE; ++r) for (let c = 0; c < BOARD_SIZE; ++c) {
+        let d = document.createElement("div");
+        d.className = "cell";
+        if (inZone("white", r)) d.classList.add("zone-white");
+        if (inZone("black", r)) d.classList.add("zone-black");
+        let piece = game.board[r][c];
+        if (piece && piece.alive) {
+          let pc = `piece-${piece.owner} piece-p${piece.type.P}`;
+          d.innerHTML = `<span class="${pc}">${piece.type.symbol}</span>`;
+          d.title = `P${piece.type.P} [A${piece.stats.A} H${piece.stats.H} S${piece.stats.S} D${piece.stats.D}]`;
+          if (state.selectedPiece === piece) d.classList.add("selected");
+        }
+        d.onclick = ()=> handleCellClick(r,c);
+        board.appendChild(d);
+      }
+
+      // Actions (End Turn, Attack Enemy Reserve)
+      let actions = document.getElementById("actions");
+      actions.innerHTML = '';
+      if (state.phase === "move" && state.hasPlaced && !state.hasMoved && game.canMoveAnyPiece(game.turn)) {
+        actions.innerHTML += `<button id="skip-move">Skip Move</button>`;
+        document.getElementById("skip-move").onclick = ()=>{
+          state.hasMoved = true;
+          updateUI();
+        };
+      }
+      if (state.phase === "move" && state.hasPlaced && state.hasMoved) {
+        actions.innerHTML += `<button id="end-turn">End Turn</button>`;
+        document.getElementById("end-turn").onclick = ()=>{
+          endTurn();
+        };
+      }
+      if (state.selectedPiece && state.phase === "move" && game.canAttackEnemyReserve(state.selectedPiece) && state.hasPlaced && !state.hasMoved) {
+        actions.innerHTML += `<button id="attack-reserve">Attack Enemy Reserve</button>`;
+        setTimeout(() => {
+          let btn = document.getElementById("attack-reserve");
+          if (btn) btn.onclick = ()=>{
+            try {
+              game.attackEnemyReserve(state.selectedPiece);
+              state.hasMoved = true;
+              state.selectedPiece = null;
+              updateUI();
+            } catch(e) { state.error = e; updateUI();}
+          };
+        });
+      }
+    }
+
+    function renderInv(player) {
+      return game.pieceInventory[player].map(t =>
+        `<span class="piece-${player} piece-p${t.P}" style="padding:1px 6px">${t.symbol}</span> x${t.count}`
+      ).join(' ');
+    }
+
+    function handleCellClick(r, c) {
+      state.error = '';
+      if (state.phase === "place") {
+        try {
+          let stats = {...state.placeStats};
+          game.placePiece(game.turn, [r,c], stats);
+          state.hasPlaced = true;
+          state.selectedPiece = null;
+          updateUI();
+        } catch(e) {
+          state.error = e;
+          updateUI();
+        }
+        return;
+      }
+      // Move phase
+      let piece = game.board[r][c];
+      if (state.phase === "move" && state.hasPlaced && !state.hasMoved) {
+        if (!state.selectedPiece) {
+          if (piece && piece.owner === game.turn && piece.alive) {
+            state.selectedPiece = piece;
+            state.moveList = game.getValidMoves(piece);
+          }
+        } else if (state.selectedPiece) {
+          let move = state.moveList.find(m => m.to[0] === r && m.to[1] === c);
+          if (move) {
+            try {
+              game.movePiece(state.selectedPiece, [r,c]);
+              state.hasMoved = true;
+              state.selectedPiece = null;
+            } catch(e) { state.error = e;}
+          } else {
+            state.selectedPiece = null;
+          }
+        }
+        updateUI();
+      }
+    }
+
+    function endTurn() {
+      if (game.winner) return;
+      game.turn = (game.turn === "white" ? "black" : "white");
+      state.hasPlaced = false;
+      state.hasMoved = false;
+      state.selectedPiece = null;
+      state.moveList = [];
+      updateUI();
+      if (state.ai && game.turn === "black" && !game.winner) {
+        setTimeout(doRandomAIMove, 700);
+      }
+    }
+
+    // ==== RANDOM BLACK AI ====
+    function doRandomAIMove() {
+      if (game.winner || game.turn !== "black") return;
+      // 1. Place, if possible
+      let placed = false;
+      if (!state.hasPlaced && game.canPlacePiece("black")) {
+        let P = game.getSmallestPInReserve("black");
+        let maxPts = 4 * P;
+        let remain = Math.min(game.reserves.black, maxPts);
+        // Distribute points randomly but ensure at least 1 in each
+        let stats = {A:1,H:1,S:1,D:1}, pool = remain-4;
+        let statNames = ["A","H","S","D"];
+        while (pool > 0) {
+          let s = statNames[Math.floor(Math.random()*4)];
+          stats[s] += 1;
+          pool -= 1;
+        }
+        // Find empty square in black zone
+        let zoneRow = 0;
+        let empties = [];
+        for (let c = 0; c < BOARD_SIZE; ++c) if (!game.board[zoneRow][c]) empties.push([zoneRow,c]);
+        if (empties.length > 0) {
+          let pick = empties[Math.floor(Math.random()*empties.length)];
+          try {
+            game.placePiece("black", pick, stats);
+            state.hasPlaced = true;
+            placed = true;
+          } catch(e){}
+        }
+      } else {
+        state.hasPlaced = true;
+      }
+      updateUI();
+
+      // 2. Move/attack, if possible
+      setTimeout(()=>{
+        if (state.phase !== "move") { endTurn(); return; }
+        if (game.canMoveAnyPiece("black")) {
+          let movable = game.getMovablePieces("black").filter(p=>
+            game.getValidMoves(p).length > 0 || game.canAttackEnemyReserve(p)
+          );
+          if (movable.length > 0) {
+            let piece = movable[Math.floor(Math.random()*movable.length)];
+            // Prefer attacking reserve if possible
+            if (game.canAttackEnemyReserve(piece)) {
+              try {
+                game.attackEnemyReserve(piece);
+                state.hasMoved = true;
+                updateUI();
+                setTimeout(()=>{ endTurn(); }, 500);
+                return;
+              } catch(e){}
+            }
+            let moves = game.getValidMoves(piece);
+            if (moves.length > 0) {
+              let move = moves[Math.floor(Math.random()*moves.length)];
+              try {
+                game.movePiece(piece, move.to);
+                state.hasMoved = true;
+                updateUI();
+                setTimeout(()=>{ endTurn(); }, 500);
+                return;
+              } catch(e){}
+            }
+          }
+        }
+        // If can't move, skip
+        state.hasMoved = true;
+        updateUI();
+        setTimeout(()=>{ endTurn(); }, 400);
+      }, 400);
+    }
+
+    updateUI();
+  </script>
+</body>
+</html>
