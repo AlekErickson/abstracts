@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Myramid</title>
+  <style>
+    body { text-align: center; font-family: sans-serif; }
+    canvas { border: 1px solid #333; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <h1>Myramid</h1>
+  <p>Click on an empty triangle to place, or on a vulnerable enemy triangle to capture.</p>
+  <label for="size">Board size (7-15): </label>
+  <input id="size" type="number" min="7" max="15" value="7">
+  <label for="ai">AI opponent: </label>
+  <select id="ai">
+    <option value="random">Random</option>
+    <option value="mcts">Weak MCTS</option>
+  </select>
+  <button onclick="startGame()">Start Game</button>
+  <div id="info"></div>
+  <canvas id="gameCanvas" width="600" height="600"></canvas>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    let boardSize, board, currentPlayer, gameOver, tilePaths, aiType;
+
+    function startGame() {
+      boardSize = parseInt(document.getElementById('size').value);
+      aiType = document.getElementById('ai').value;
+      board = Array.from({ length: boardSize }, (_, r) => Array(2 * r + 1).fill(0));
+      currentPlayer = 1;
+      gameOver = false;
+      updateInfo();
+      drawBoard();
+    }
+
+    function updateInfo(text) {
+      document.getElementById('info').textContent = text ||
+        (currentPlayer === 1 ? "Red's turn" : "Blue's turn");
+    }
+
+    function drawBoard() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      tilePaths = [];
+      const margin = 20;
+      const rows = boardSize;
+      const availH = canvas.height - 2 * margin;
+      const availW = canvas.width - 2 * margin;
+      const H = Math.min(availH / rows, availW * Math.sqrt(3) / (2 * rows));
+      const dx = H / Math.sqrt(3);
+      const cx0 = canvas.width / 2;
+
+      for (let r = 0; r < rows; r++) {
+        const y0 = margin + r * H;
+        const cols = 2 * r + 1;
+        for (let c = 0; c < cols; c++) {
+          const x0 = cx0 + (c - r) * dx;
+          const up = c % 2 === 0;
+          const path = new Path2D();
+          if (up) {
+            path.moveTo(x0, y0);
+            path.lineTo(x0 - dx, y0 + H);
+            path.lineTo(x0 + dx, y0 + H);
+          } else {
+            path.moveTo(x0, y0 + H);
+            path.lineTo(x0 - dx, y0);
+            path.lineTo(x0 + dx, y0);
+          }
+          path.closePath();
+          ctx.stroke(path);
+          if (board[r][c] !== 0) {
+            ctx.fillStyle = board[r][c] === 1 ? 'red' : 'blue';
+            ctx.fill(path);
+          }
+          tilePaths.push({ r, c, path });
+        }
+      }
+    }
+
+    canvas.addEventListener('click', e => {
+      if (gameOver || currentPlayer !== 1) return;
+      const { left, top } = canvas.getBoundingClientRect();
+      const mx = e.clientX - left;
+      const my = e.clientY - top;
+      const opp = -currentPlayer;
+      for (const { r, c, path } of tilePaths) {
+        if (!ctx.isPointInPath(path, mx, my)) continue;
+        if (board[r][c] === 0) return handleMove(r, c, 'place');
+        if (board[r][c] === opp && isVulnerable(r, c)) return handleMove(r, c, 'capture');
+      }
+    });
+
+    function getNeighbors(r, c) {
+      const up = c % 2 === 0;
+      const list = up ? [[r, c-1], [r, c+1], [r+1, c+1]] : [[r, c-1], [r, c+1], [r-1, c-1]];
+      return list.filter(([i, j]) => i >= 0 && i < boardSize && j >= 0 && j < board[i].length);
+    }
+
+    function isVulnerable(r, c) {
+      const opp = board[r][c];
+      const neigh = getNeighbors(r, c);
+      const fri = neigh.filter(([i, j]) => board[i][j] === -opp).length;
+      const ene = neigh.filter(([i, j]) => board[i][j] === opp).length;
+      const empt = neigh.filter(([i, j]) => board[i][j] === 0).length;
+      return empt === 0 && fri > ene;
+    }
+
+    function handleMove(r, c, type) {
+      board[r][c] = currentPlayer;
+      drawBoard();
+      if (checkVictory(currentPlayer)) {
+        gameOver = true;
+        updateInfo((currentPlayer === 1 ? 'Red' : 'Blue') + ' wins!');
+        return;
+      }
+      currentPlayer *= -1;
+      updateInfo();
+      if (!gameOver) {
+        if (currentPlayer === -1) {
+          setTimeout(() => {
+            if (aiType === 'mcts') mctsMove(); else randomMove();
+          }, 200);
+        }
+      }
+    }
+
+    function checkVictory(player) {
+      const visited = new Set();
+      for (let r = 0; r < boardSize; r++) {
+        for (let c = 0; c < board[r].length; c++) {
+          if (board[r][c] !== player) continue;
+          const startKey = `${r},${c}`;
+          if (visited.has(startKey)) continue;
+          const stack = [[r, c]];
+          visited.add(startKey);
+          const edges = new Set();
+          while (stack.length) {
+            const [i, j] = stack.pop();
+            if (j === 0) edges.add('left');
+            if (j === board[i].length - 1) edges.add('right');
+            if (i === boardSize - 1 && j % 2 === 0) edges.add('bottom');
+            for (const [nr, nc] of getNeighbors(i, j)) {
+              if (board[nr][nc] === player) {
+                const key = `${nr},${nc}`;
+                if (!visited.has(key)) { visited.add(key); stack.push([nr, nc]); }
+              }
+            }
+          }
+          if (edges.size === 3) return true;
+        }
+      }
+      return false;
+    }
+
+    function randomMove() {
+      const moves = [];
+      const opp = -currentPlayer;
+      for (let r = 0; r < boardSize; r++) {
+        for (let c = 0; c < board[r].length; c++) {
+          if (board[r][c] === 0) moves.push([r, c, 'place']);
+          else if (board[r][c] === opp && isVulnerable(r, c)) moves.push([r, c, 'capture']);
+        }
+      }
+      if (!moves.length) return;
+      const [r, c, t] = moves[Math.floor(Math.random() * moves.length)];
+      handleMove(r, c, t);
+    }
+
+    // Weak MCTS: simulate playouts for each candidate and pick best
+    function mctsMove() {
+      const sims = 20;
+      const moves = [];
+      const opp = -currentPlayer;
+      for (let r = 0; r < boardSize; r++) {
+        for (let c = 0; c < board[r].length; c++) {
+          if (board[r][c] === 0) moves.push([r, c, 'place']);
+          else if (board[r][c] === opp && isVulnerable(r, c)) moves.push([r, c, 'capture']);
+        }
+      }
+      if (!moves.length) return;
+      let best = moves[0], bestRate = -1;
+      for (const m of moves) {
+        let wins = 0;
+        for (let i = 0; i < sims; i++) {
+          if (simulate(m)) wins++;
+        }
+        const rate = wins / sims;
+        if (rate > bestRate) { bestRate = rate; best = m; }
+      }
+      handleMove(...best);
+    }
+
+    function simulate(move) {
+      // deep clone
+      const simBoard = board.map(r => r.slice());
+      let simPlayer = currentPlayer;
+      // apply move
+      simBoard[move[0]][move[1]] = simPlayer;
+      simPlayer *= -1;
+      // random playout
+      while (true) {
+        // check terminal
+        if (checkVictorySim(simBoard, -simPlayer)) return !checkVictorySim(simBoard, simPlayer);
+        const opts = [];
+        const opp = -simPlayer;
+        for (let r = 0; r < boardSize; r++) {
+          for (let c = 0; c < simBoard[r].length; c++) {
+            if (simBoard[r][c] === 0) opts.push([r, c, 'place']);
+            else if (simBoard[r][c] === opp && isVulSim(simBoard, r, c)) opts.push([r, c, 'capture']);
+          }
+        }
+        if (!opts.length) return false;
+        const [r, c, t] = opts[Math.floor(Math.random() * opts.length)];
+        simBoard[r][c] = simPlayer;
+        simPlayer *= -1;
+      }
+    }
+    function isVulSim(b, r, c) {
+      const opp = b[r][c];
+      const neigh = getNeighbors(r, c);
+      let fri=0, ene=0, empt=0;
+      neigh.forEach(([i,j]) => {
+        if (b[i][j] === -opp) fri++;
+        else if (b[i][j] === opp) ene++;
+        else empt++;
+      });
+      return empt === 0 && fri > ene;
+    }
+    function checkVictorySim(b, player) {
+      const vis = new Set();
+      for (let r=0; r<boardSize; r++) for (let c=0; c<b[r].length; c++) if (b[r][c]===player) {
+        const k=`${r},${c}`; if (vis.has(k)) continue;
+        const stack=[[r,c]]; vis.add(k);
+        const edges=new Set();
+        while(stack.length) {
+          const [i,j]=stack.pop();
+          if (j===0) edges.add('left');
+          if (j===b[i].length-1) edges.add('right');
+          if (i===boardSize-1 && j%2===0) edges.add('bottom');
+          for (const [nr,nc] of getNeighbors(i,j)) if (b[nr][nc]===player) {
+            const kk=`${nr},${nc}`; if (!vis.has(kk)) {vis.add(kk); stack.push([nr,nc]);}
+          }
+        }
+        if (edges.size===3) return true;
+      }
+      return false;
+    }
+
+    startGame();
+  </script>
+</body>
+</html>
