@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Bowline</title>
+  <style>
+    /* outside the board */
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+      background: #eceff1;          /* light grey outside */
+    }
+
+    /* container around header + canvas */
+    .game-container {
+      background: #ffffff;          /* white inside the box */
+      padding: 16px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+      text-align: center;
+    }
+
+    /* header styling */
+    .game-container h1 {
+      margin: 0 0 12px;
+      font-family: sans-serif;
+      font-size: 24px;
+      color: #333;
+    }
+
+    /* canvas background */
+    #board {
+      background: #ba8c63;          /* your original board color */
+      border: 1px solid #333;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="game-container">
+    <h1>Bowline</h1>
+    <canvas id="board" width="600" height="600"></canvas>
+  </div>
+  <script>
+    console.log("Hello bitches!")
+    const canvas = document.getElementById('board');
+    const ctx = canvas.getContext('2d');
+    const radius = 3;
+    const hexSize = 30;
+    const board = {};
+    let turn = 'black';
+    let selectingArc = false;
+    let selected = [];
+
+    // initialize board
+    for (let q = -radius; q <= radius; q++) {
+      for (let r = -radius; r <= radius; r++) {
+        if (Math.abs(q + r) <= radius) board[`${q},${r}`] = null;
+      }
+    }
+
+    // neighbor directions and lookup
+    const dirs = [[1,0],[1,-1],[0,-1],[-1,0],[-1,1],[0,1]];
+    const dirMap = {};
+    dirs.forEach((d,i) => dirMap[`${d[0]},${d[1]}`] = i);
+
+    function hexToPixel(q, r) {
+      const x = hexSize * (Math.sqrt(3) * q + Math.sqrt(3)/2 * r) + canvas.width/2;
+      const y = hexSize * (3/2 * r) + canvas.height/2;
+      return { x, y };
+    }
+
+    function drawHex(x, y, fillColor) {
+      const s = hexSize;
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const ang = Math.PI/180 * (60 * i - 30);
+        const xi = x + s * Math.cos(ang);
+        const yi = y + s * Math.sin(ang);
+        if (i === 0) ctx.moveTo(xi, yi);
+        else ctx.lineTo(xi, yi);
+      }
+      ctx.closePath(); ctx.strokeStyle = '#333'; ctx.stroke();
+      if (fillColor) { ctx.fillStyle = fillColor; ctx.fill(); }
+    }
+
+    function render() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (const key in board) {
+        const [q, r] = key.split(',').map(Number);
+        const { x, y } = hexToPixel(q, r);
+        drawHex(x, y);
+        if (board[key]) {
+          ctx.beginPath(); ctx.arc(x, y, hexSize * 0.6, 0, Math.PI * 2);
+          ctx.fillStyle = board[key]; ctx.fill();
+        }
+        if (selected.includes(key)) drawHex(x, y, 'rgba(255,255,0,0.4)');
+      }
+    }
+
+    function getKeyAt(x, y) {
+      for (const key in board) {
+        const [q, r] = key.split(',').map(Number);
+        const p = hexToPixel(q, r);
+        if (Math.hypot(x - p.x, y - p.y) < hexSize * 0.8) return key;
+      }
+      return null;
+    }
+
+    function isNeighbor(a, b) {
+      const [q1, r1] = a.split(',').map(Number);
+      const [q2, r2] = b.split(',').map(Number);
+      return dirs.some(([dq, dr]) => q1 + dq === q2 && r1 + dr === r2);
+    }
+
+    // helper to test if a hex is on the outer ring
+    function isOnBorder(key) {
+      const [q, r] = key.split(',').map(Number);
+      return Math.abs(q) === radius
+          || Math.abs(r) === radius
+          || Math.abs(q + r) === radius;
+    }
+
+    // flood‑fill all cells != color from the border
+    function floodFillNonColor(color) {
+      const visited = {};
+      const stack = [];
+
+      // seed with border cells that are not that color
+      for (const key in board) {
+        if (isOnBorder(key) && board[key] !== color) {
+          visited[key] = true;
+          stack.push(key);
+        }
+      }
+
+      // standard DFS/BFS on neighbors that are also not that color
+      while (stack.length) {
+        const k = stack.pop();
+        const [q, r] = k.split(',').map(Number);
+        dirs.forEach(([dq, dr]) => {
+          const nk = `${q + dq},${r + dr}`;
+          if (
+            board.hasOwnProperty(nk) &&
+            board[nk] !== color &&
+            !visited[nk]
+          ) {
+            visited[nk] = true;
+            stack.push(nk);
+          }
+        });
+      }
+
+      return visited;
+    }
+
+    // returns true if `color` has just formed a loop
+    function checkLoop(color) {
+      const reachable = floodFillNonColor(color);
+
+      // any non‑color cell not reached is trapped
+      return Object.keys(board).some(
+        k => board[k] !== color && !reachable[k]
+      );
+    }
+
+
+    function isMonotonic(seq) {
+      // build pixel points for angle checks
+      const pts = selected.map(key => {
+        const [q, r] = key.split(',').map(Number);
+        return hexToPixel(q, r);
+      });
+      // angle and monotonic turn checks
+      let turnSign = 0;
+      for (let i = 1; i < pts.length - 1; i++) {
+        const prev = { x: pts[i].x - pts[i - 1].x, y: pts[i].y - pts[i - 1].y };
+        const next = { x: pts[i + 1].x - pts[i].x, y: pts[i + 1].y - pts[i].y };
+        const dot = prev.x * next.x + prev.y * next.y;
+        const magPrev = Math.hypot(prev.x, prev.y);
+        const magNext = Math.hypot(next.x, next.y);
+        const cosTheta = dot / (magPrev * magNext);
+        // invert: block 120° and 180° (cos ≤ -0.49)
+        if (cosTheta <= -0.49) return false;
+        // ensure consistent turning direction
+        const cross = prev.x * next.y - prev.y * next.x;
+        const sign = cross > 0 ? 1 : (cross < 0 ? -1 : 0);
+        if (sign !== 0) {
+          if (turnSign === 0) turnSign = sign;
+          else if (turnSign !== sign) return false;
+        }
+      }
+      return true
+    }
+
+    function isSelectionValid() {
+      if (selected.length < 3) return false;
+      const opponent = turn === 'black' ? 'white' : 'black';
+      // endpoints must be own stones
+      const first = selected[0], 
+      last = selected[selected.length - 1];
+      if (board[first] !== turn || board[last] !== turn) return false;
+      // middles must be opponent stones
+      const middles = selected.slice(1, -1);
+      if (!middles.every(k => board[k] === opponent)) return false;
+      // adjacency check
+      for (let i = 0; i < selected.length - 1; i++) {
+        if (!isNeighbor(selected[i], selected[i + 1])) return false;
+      }
+      if (!isMonotonic(selected)) return false;
+      return true;
+    }
+
+    // validate any arc for a given sequence and mover color
+    function isArcValid(seq, color, flippedMids) {
+      if (seq.length < 3) return false;
+      var other = color
+      if (flippedMids) other = color === 'black' ? 'white' : 'black';
+      // endpoints
+      if (board[seq[0]] !== color || board[seq[seq.length - 1]] !== color) return false;
+      // middles
+      const mids = seq.slice(1, -1);
+      if (!mids.every(k => board[k] === other)) return false;
+      // adjacency and record directions
+      const dirsUsed = [];
+      for (let i = 0; i < seq.length - 1; i++) {
+        const a = seq[i].split(',').map(Number);
+        const b = seq[i + 1].split(',').map(Number);
+        const key = `${b[0] - a[0]},${b[1] - a[1]}`;
+        if (!(key in dirMap)) return false;
+      }
+      if (!isMonotonic(seq)) return false;
+
+      return true;
+    }
+    const l= ['2,-1', '1,0', '0,0', '0,-1']
+
+    // check if opponent has any valid flanking arc over these middle stones
+    function isFlankedByOpponent() {
+      const opp = turn === 'black' ? 'white' : 'black';
+      const mids = selected.slice(1, -1);
+      if (mids.length < 1) return false;
+      const oppKeys = Object.keys(board).filter(k => board[k] === opp);
+      for (let i = 0; i < oppKeys.length; i++) {
+        for (let j = 0; j < oppKeys.length; j++) {
+          if (i === j) continue;
+          if (mids.includes(oppKeys[i])) continue;
+          if (mids.includes(oppKeys[j])) continue;
+          const seq = [oppKeys[i], ...mids, oppKeys[j]];
+          if (isArcValid(seq, opp, false)) return true;
+        }
+      }
+      return false;
+    }
+
+    function tryFlip() {
+      if (isSelectionValid()) {
+        if (isFlankedByOpponent()) alert('Cannot flip: opponent also flanks these stones.');
+        else {
+          selected.slice(1, -1).forEach(k => board[k] = turn);
+          if (checkLoop(turn)) setTimeout(() => alert(turn + ' loses!'), 10);
+          turn = turn === 'black' ? 'white' : 'black';
+        }
+      }
+      selectingArc = false; selected = [];
+      render();
+    }
+
+    canvas.addEventListener('click', e => {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left, y = e.clientY - rect.top;
+      const key = getKeyAt(x, y);
+      if (!key) return;
+      if (!selectingArc) {
+        if (board[key] === null) {
+          board[key] = turn;
+          if (checkLoop(turn)) setTimeout(() => alert(turn + ' loses!'), 10);
+          turn = turn === 'black' ? 'white' : 'black';
+          render();
+        } else {
+          selectingArc = true; selected = [key]; render();
+        }
+      } else {
+        if (selected.includes(key)) {
+          // allow deselect
+          selected = selected.filter(k => k !== key);
+        } else {
+          // only allow selecting adjacent stones
+          const last = selected[selected.length - 1];
+          if (isNeighbor(last, key)) selected.push(key);
+        }
+        render();
+        if (board[key] === turn) tryFlip();
+      }
+    });
+
+    render();
+  </script>
+</body>
+</html>
