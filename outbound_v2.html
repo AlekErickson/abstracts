@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Outbound </title>
+  <style>
+    body { font-family: sans-serif; text-align: center; margin-top: 20px; }
+    canvas { border: 1px solid #333; cursor: pointer; }
+    #status { margin-top: 10px; font-weight: bold; }
+    #controls { margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h2>Outbound</h2>
+  <canvas id="board" width="570" height="570"></canvas>
+  <div id="status"></div>
+  <div id="controls">
+    <button id="reset">Reset</button>
+  </div>
+
+  <script>
+  const SIZE = 19;
+  const CELL = 30;
+
+  const canvas = document.getElementById("board");
+  const ctx = canvas.getContext("2d");
+  const statusDiv = document.getElementById("status");
+  const resetBtn = document.getElementById("reset");
+
+  let board;
+  let currentPlayer;
+  let gameOver;
+
+  let selectedWhite = null;
+
+  let kingX = null;
+  let kingY = null;
+
+  let originalGroups = [];   // { id, frontier:[{x,y}], used:false }
+  let placementsRemaining = 0;
+  let placementsThisTurn = [];
+
+  // ---------------- Utility ----------------
+
+  function setStatus(msg) {
+    statusDiv.textContent = msg;
+  }
+
+  function initBoard() {
+    board = [];
+    for (let y = 0; y < SIZE; y++) {
+      board.push(new Array(SIZE).fill(0));
+    }
+
+    // Black king in the centre
+    const mid = Math.floor(SIZE / 2);
+    board[mid][mid] = 1;
+    kingX = mid;
+    kingY = mid;
+
+    // White hunters around edge every 3
+    for (let i = 0; i < SIZE; i += 3) {
+      placeWhiteIfEmpty(i, 0);
+      placeWhiteIfEmpty(i, SIZE - 1);
+      placeWhiteIfEmpty(0, i);
+      placeWhiteIfEmpty(SIZE - 1, i);
+    }
+
+    currentPlayer = 'white';
+    gameOver = false;
+    selectedWhite = null;
+    placementsThisTurn = [];
+    setStatus("White to move.");
+    draw();
+  }
+
+  function placeWhiteIfEmpty(x, y) {
+    if (board[y][x] === 0) board[y][x] = 2;
+  }
+
+  // ---------------- Drawing ----------------
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Grid
+    ctx.strokeStyle = "#999";
+    for (let i = 0; i <= SIZE; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * CELL + 0.5, 0.5);
+      ctx.lineTo(i * CELL + 0.5, SIZE * CELL + 0.5);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(0.5, i * CELL + 0.5);
+      ctx.lineTo(SIZE * CELL + 0.5, i * CELL + 0.5);
+      ctx.stroke();
+    }
+
+    // White line of sight (through white pieces, blocked by black)
+    drawWhiteLineOfSight();
+
+    // Stones
+    for (let y = 0; y < SIZE; y++) {
+      for (let x = 0; x < SIZE; x++) {
+        const v = board[y][x];
+        if (v === 0) continue;
+
+        const cx = x * CELL + CELL / 2;
+        const cy = y * CELL + CELL / 2;
+        const r = CELL * 0.4;
+
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+
+        if (v === 1) {
+          ctx.fillStyle = "#000";
+          ctx.fill();
+          // King highlight
+          if (x === kingX && y === kingY) {
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = "gold";
+            ctx.stroke();
+            ctx.lineWidth = 1;
+          }
+        } else if (v === 2) {
+          ctx.fillStyle = "#fff";
+          ctx.fill();
+          ctx.strokeStyle = "#000";
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Highlight selected hunter
+    if (selectedWhite) {
+      const { x, y } = selectedWhite;
+      ctx.strokeStyle = "red";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x * CELL + 2, y * CELL + 2, CELL - 4, CELL - 4);
+      ctx.lineWidth = 1;
+    }
+  }
+
+  function drawWhiteLineOfSight() {
+    ctx.fillStyle = "rgba(0, 0, 0, 0.125)";
+    for (let y = 0; y < SIZE; y++) {
+      for (let x = 0; x < SIZE; x++) {
+        if (board[y][x] === 2) {
+          const dirs = [
+            [1, 0], [-1, 0], [0, 1], [0, -1],
+            [1, 1], [1, -1], [-1, 1], [-1, -1]
+          ];
+          for (const [dx, dy] of dirs) {
+            let cx = x + dx;
+            let cy = y + dy;
+            while (cx >= 0 && cx < SIZE && cy >= 0 && cy < SIZE) {
+              // highlight this square regardless of white
+              ctx.fillRect(cx * CELL + 0.5, cy * CELL + 0.5, CELL - 1, CELL - 1);
+              // stop if we hit a black stone
+              if (board[cy][cx] === 1) break;
+              cx += dx;
+              cy += dy;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  function getCellFromEvent(evt) {
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor((evt.clientX - rect.left) / CELL);
+    const y = Math.floor((evt.clientY - rect.top) / CELL);
+    if (x < 0 || x >= SIZE || y < 0 || y >= SIZE) return null;
+    return { x, y };
+  }
+
+  // ---------------- Group / king logic ----------------
+
+  function getBlackGroups() {
+    const visited = Array.from({ length: SIZE }, () => Array(SIZE).fill(false));
+    const groups = [];
+    let gid = 0;
+
+    for (let y = 0; y < SIZE; y++) {
+      for (let x = 0; x < SIZE; x++) {
+        if (board[y][x] === 1 && !visited[y][x]) {
+          gid++;
+          const queue = [{ x, y }];
+          visited[y][x] = true;
+          const cells = [];
+
+          while (queue.length) {
+            const c = queue.shift();
+            cells.push(c);
+            const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+            for (const [dx, dy] of dirs) {
+              const nx = c.x + dx;
+              const ny = c.y + dy;
+              if (nx >= 0 && nx < SIZE && ny >= 0 && ny < SIZE) {
+                if (!visited[ny][nx] && board[ny][nx] === 1) {
+                  visited[ny][nx] = true;
+                  queue.push({ x: nx, y: ny });
+                }
+              }
+            }
+          }
+
+          // Collect frontier for this group
+          const frontierSet = new Set();
+          for (const c of cells) {
+            const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+            for (const [dx, dy] of dirs) {
+              const nx = c.x + dx;
+              const ny = c.y + dy;
+              if (nx >= 0 && nx < SIZE && ny >= 0 && ny < SIZE) {
+                if (board[ny][nx] === 0) {
+                  frontierSet.add(ny * SIZE + nx);
+                }
+              }
+            }
+          }
+
+          const frontier = Array.from(frontierSet).map(i => ({
+            x: i % SIZE,
+            y: Math.floor(i / SIZE),
+          }));
+
+          if (frontier.length > 0) {
+            groups.push({ id: gid, frontier, used: false });
+          }
+        }
+      }
+    }
+    return groups;
+  }
+
+  function getKingGroup() {
+    if (kingX == null || kingY == null) return [];
+    if (board[kingY][kingX] !== 1) return [];
+
+    const visited = Array.from({ length: SIZE }, () => Array(SIZE).fill(false));
+    const queue = [{ x: kingX, y: kingY }];
+    const cells = [];
+    visited[kingY][kingX] = true;
+
+    while (queue.length) {
+      const c = queue.shift();
+      cells.push(c);
+      const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      for (const [dx, dy] of dirs) {
+        const nx = c.x + dx;
+        const ny = c.y + dy;
+        if (nx >= 0 && nx < SIZE && ny >= 0 && ny < SIZE) {
+          if (!visited[ny][nx] && board[ny][nx] === 1) {
+            visited[ny][nx] = true;
+            queue.push({ x: nx, y: ny });
+          }
+        }
+      }
+    }
+    return cells;
+  }
+
+  function kingGroupHasGrowth() {
+    const group = getKingGroup();
+    if (group.length === 0) return false;
+    for (const c of group) {
+      const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      for (const [dx, dy] of dirs) {
+        const nx = c.x + dx;
+        const ny = c.y + dy;
+        if (nx >= 0 && nx < SIZE && ny >= 0 && ny < SIZE) {
+          if (board[ny][nx] === 0) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function kingGroupHasEdge() {
+    const group = getKingGroup();
+    for (const c of group) {
+      if (c.x === 0 || c.x === SIZE - 1 || c.y === 0 || c.y === SIZE - 1)
+        return true;
+    }
+    return false;
+  }
+
+  // After each black placement: if new stone is in same component as king,
+  // move crown to the new stone (king is invulnerable but always on last grown cell).
+  function updateKingAfterPlacement(px, py) {
+    if (kingX == null || kingY == null) {
+      kingX = px;
+      kingY = py;
+      return;
+    }
+    // BFS from new stone to see if we can reach old king
+    const visited = Array.from({ length: SIZE }, () => Array(SIZE).fill(false));
+    const queue = [{ x: px, y: py }];
+    visited[py][px] = true;
+    let connects = false;
+
+    while (queue.length) {
+      const c = queue.shift();
+      if (c.x === kingX && c.y === kingY) {
+        connects = true;
+        break;
+      }
+      const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      for (const [dx, dy] of dirs) {
+        const nx = c.x + dx;
+        const ny = c.y + dy;
+        if (nx >= 0 && nx < SIZE && ny >= 0 && ny < SIZE) {
+          if (!visited[ny][nx] && board[ny][nx] === 1) {
+            visited[ny][nx] = true;
+            queue.push({ x: nx, y: ny });
+          }
+        }
+      }
+    }
+
+    if (connects) {
+      kingX = px;
+      kingY = py;
+    }
+  }
+
+  // ---------------- Turn flow ----------------
+
+  function startBlackTurn() {
+    originalGroups = getBlackGroups();
+    placementsRemaining = originalGroups.length;
+    placementsThisTurn = [];
+
+    if (placementsRemaining === 0) {
+      // If king still exists but has no growth, White wins by encirclement.
+      if (!kingGroupHasGrowth()) {
+        setStatus("White wins: king's group cannot grow.");
+        gameOver = true;
+        draw();
+        return;
+      }
+      // Safety fallback; shouldn't normally happen.
+    }
+
+    setStatus(`Black: place ${placementsRemaining} stone(s).`);
+    draw();
+  }
+
+  function handleClick(evt) {
+    if (gameOver) return;
+    const cell = getCellFromEvent(evt);
+    if (!cell) return;
+    const { x, y } = cell;
+
+    if (currentPlayer === "black") {
+      handleBlackClick(x, y);
+    } else {
+      handleWhiteClick(x, y);
+    }
+  }
+
+  function handleBlackClick(x, y) {
+    if (placementsRemaining <= 0) return;
+    if (board[y][x] !== 0) return;
+
+    // Which original groups' frontier is this cell part of?
+    const groupsUsed = [];
+    for (const g of originalGroups) {
+      if (g.used) continue;
+      if (g.frontier.some(p => p.x === x && p.y === y)) {
+        groupsUsed.push(g);
+      }
+    }
+    if (groupsUsed.length === 0) return; // illegal placement
+
+    // Place the stone
+    board[y][x] = 1;
+    placementsThisTurn.push({ x, y });
+
+    // Update king location if this grows king-group
+    updateKingAfterPlacement(x, y);
+
+    // Check edge win
+    if (kingGroupHasEdge()) {
+      draw();
+      setStatus("Black wins: king's group reached the edge!");
+      gameOver = true;
+      return;
+    }
+
+    // Consume growth tokens for each group this touches
+    for (const g of groupsUsed) g.used = true;
+    placementsRemaining -= groupsUsed.length;
+
+    if (placementsRemaining > 0) {
+      setStatus(`Black: place ${placementsRemaining} stone(s).`);
+      draw();
+      return;
+    }
+
+    // End of Black turn: check encirclement
+    if (!kingGroupHasGrowth()) {
+      draw();
+      setStatus("White wins: king's group cannot grow.");
+      gameOver = true;
+      return;
+    }
+
+    currentPlayer = "white";
+    selectedWhite = null;
+    setStatus("White to move.");
+    draw();
+  }
+
+  // ---------------- White movement & capture ----------------
+
+  function canWhiteMove(from, x, y) {
+    if (board[y][x] !== 0) return false;
+
+    const dx = x - from.x;
+    const dy = y - from.y;
+    if (!(dx === 0 || dy === 0 || Math.abs(dx) === Math.abs(dy))) return false;
+
+    const stepX = dx === 0 ? 0 : (dx > 0 ? 1 : -1);
+    const stepY = dy === 0 ? 0 : (dy > 0 ? 1 : -1);
+
+    let cx = from.x + stepX;
+    let cy = from.y + stepY;
+    while (cx !== x || cy !== y) {
+      if (board[cy][cx] === 1) return false; // can't pass through beasts
+      cx += stepX;
+      cy += stepY;
+    }
+    return true;
+  }
+
+  function applyCustodialCapture(fromX, fromY) {
+    // 8 directions: orthogonal + diagonal
+    const dirs = [
+      [1, 0],  [-1, 0],  [0, 1],  [0, -1],
+      [1, 1],  [1, -1],  [-1, 1], [-1, -1]
+    ];
+
+    for (const [dx, dy] of dirs) {
+      const mx = fromX + dx;      // adjacent cell (potential beast)
+      const my = fromY + dy;
+      const ax = mx + dx;         // hunter on opposite side
+      const ay = my + dy;
+
+      // Bounds check
+      if (
+        mx < 0 || mx >= SIZE || my < 0 || my >= SIZE ||
+        ax < 0 || ax >= SIZE || ay < 0 || ay >= SIZE
+      ) continue;
+
+      // Pattern: hunter – beast – hunter (in any of 8 directions)
+      if (board[my][mx] === 1 && board[ay][ax] === 2) {
+
+        // King remains invulnerable
+        if (mx === kingX && my === kingY) continue;
+
+        // Flip the beast to a hunter
+        board[my][mx] = 2;
+      }
+    }
+  }
+
+
+
+  function handleWhiteClick(x, y) {
+    if (!selectedWhite) {
+      if (board[y][x] === 2) {
+        selectedWhite = { x, y };
+        setStatus("White: choose a destination.");
+        draw();
+      }
+      return;
+    }
+
+    if (selectedWhite.x === x && selectedWhite.y === y) {
+      selectedWhite = null;
+      setStatus("White to move.");
+      draw();
+      return;
+    }
+
+    if (!canWhiteMove(selectedWhite, x, y)) return;
+
+    board[y][x] = 2;
+    board[selectedWhite.y][selectedWhite.x] = 0;
+    selectedWhite = null;
+
+    applyCustodialCapture(x, y);
+    draw();
+    if (gameOver) return;
+
+    // After White move, check encirclement
+    if (!kingGroupHasGrowth()) {
+      setStatus("White wins: king's group cannot grow.");
+      gameOver = true;
+      return;
+    }
+
+    currentPlayer = "black";
+    startBlackTurn();
+  }
+
+  // ---------------- Events ----------------
+
+  canvas.addEventListener("click", handleClick);
+  resetBtn.addEventListener("click", initBoard);
+
+  initBoard();
+  </script>
+</body>
+</html>
