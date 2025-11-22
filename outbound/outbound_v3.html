@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>OUTBOUND with AI</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; margin-top: 20px; }
+    canvas { border: 1px solid #333; cursor: pointer; display: block; margin: 0 auto; }
+    #status { margin-top: 10px; font-weight: bold; }
+    #controls { margin-top: 10px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+    #controls-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; }
+    button, select { font-size: 14px; padding: 4px 8px; }
+  </style>
+</head>
+<body>
+  <h2>OUTBOUND with AI</h2>
+  <canvas id="board" width="570" height="570"></canvas>
+  <div id="status"></div>
+
+  <div id="controls">
+    <div id="controls-row">
+      <span>Play as:</span>
+      <button id="btnPlayWhite">White (Hunters)</button>
+      <button id="btnPlayBlack">Black (Beast)</button>
+    </div>
+    <div id="controls-row">
+      <label>
+        White setup:
+        <select id="whiteSetup">
+          <option value="standard">Standard edge (every 3)</option>
+          <option value="dense">Dense edge (every 2)</option>
+          <option value="sparse">Sparse edge (every 4)</option>
+          <option value="random">Random edge</option>
+        </select>
+      </label>
+      <button id="reset">Start / Reset</button>
+    </div>
+  </div>
+
+  <script>
+  const SIZE = 19;
+  const CELL = 30;
+
+  const canvas = document.getElementById("board");
+  const ctx = canvas.getContext("2d");
+  const statusDiv = document.getElementById("status");
+  const resetBtn = document.getElementById("reset");
+  const btnPlayWhite = document.getElementById("btnPlayWhite");
+  const btnPlayBlack = document.getElementById("btnPlayBlack");
+  const whiteSetupSelect = document.getElementById("whiteSetup");
+
+  let board;                 // 0 empty, 1 black, 2 white
+  let currentPlayer;         // "black" or "white"
+  let humanPlays = "white";  // "white" or "black"
+  let gameOver;
+
+  let selectedWhite = null;
+
+  let kingX = null;
+  let kingY = null;
+
+  let originalGroups = [];   // { id, frontier:[{x,y}], used:false }
+  let placementsRemaining = 0;
+
+  // ---------------- Utility ----------------
+
+  function setStatus(msg) {
+    statusDiv.textContent = msg;
+  }
+
+  function initBoard() {
+    board = [];
+    for (let y = 0; y < SIZE; y++) {
+      board.push(new Array(SIZE).fill(0));
+    }
+
+    // Black king in centre
+    const mid = Math.floor(SIZE / 2);
+    board[mid][mid] = 1;
+    kingX = mid;
+    kingY = mid;
+
+    // Place white based on selected setup
+    setupWhitePieces(whiteSetupSelect.value);
+
+    currentPlayer = "white";   // White always starts
+    gameOver = false;
+    selectedWhite = null;
+    placementsRemaining = 0;
+    originalGroups = [];
+
+    if (humanPlays === "white") {
+      setStatus("White (You) to move.");
+    } else {
+      setStatus("White (AI) to move.");
+      // Let the browser draw once, then let AI move
+      setTimeout(runAITurn, 150);
+    }
+    draw();
+  }
+
+  function setupWhitePieces(mode) {
+    if (mode === "random") {
+      const prob = 0.35;
+      // Top and bottom edges
+      for (let x = 0; x < SIZE; x++) {
+        if (Math.random() < prob && board[0][x] === 0) board[0][x] = 2;
+        if (Math.random() < prob && board[SIZE-1][x] === 0) board[SIZE-1][x] = 2;
+      }
+      // Left and right edges
+      for (let y = 0; y < SIZE; y++) {
+        if (Math.random() < prob && board[y][0] === 0) board[y][0] = 2;
+        if (Math.random() < prob && board[y][SIZE-1] === 0) board[y][SIZE-1] = 2;
+      }
+      return;
+    }
+
+    let step = 3;
+    if (mode === "dense") step = 2;
+    else if (mode === "sparse") step = 4;
+
+    for (let i = 0; i < SIZE; i += step) {
+      // top
+      if (board[0][i] === 0) board[0][i] = 2;
+      // bottom
+      if (board[SIZE-1][i] === 0) board[SIZE-1][i] = 2;
+      // left
+      if (board[i][0] === 0) board[i][0] = 2;
+      // right
+      if (board[i][SIZE-1] === 0) board[i][SIZE-1] = 2;
+    }
+  }
+
+  // ---------------- Drawing ----------------
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Grid
+    ctx.strokeStyle = "#999";
+    for (let i = 0; i <= SIZE; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * CELL + 0.5, 0.5);
+      ctx.lineTo(i * CELL + 0.5, SIZE * CELL + 0.5);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(0.5, i * CELL + 0.5);
+      ctx.lineTo(SIZE * CELL + 0.5, i * CELL + 0.5);
+      ctx.stroke();
+    }
+
+    // White LOS shading
+    drawWhiteLineOfSight();
+
+    // Stones
+    for (let y = 0; y < SIZE; y++) {
+      for (let x = 0; x < SIZE; x++) {
+        const v = board[y][x];
+        if (v === 0) continue;
+        const cx = x * CELL + CELL / 2;
+        const cy = y * CELL + CELL / 2;
+        const r  = CELL * 0.4;
+
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+
+        if (v === 1) {
+          ctx.fillStyle = "#000";
+          ctx.fill();
+          if (x === kingX && y === kingY) {
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = "gold";
+            ctx.stroke();
+            ctx.lineWidth = 1;
+          }
+        } else if (v === 2) {
+          ctx.fillStyle = "#fff";
+          ctx.fill();
+          ctx.strokeStyle = "#000";
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Selected white
+    if (selectedWhite) {
+      const { x, y } = selectedWhite;
+      ctx.strokeStyle = "red";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x * CELL + 2, y * CELL + 2, CELL - 4, CELL - 4);
+      ctx.lineWidth = 1;
+    }
+  }
+
+  function drawWhiteLineOfSight() {
+    ctx.fillStyle = "rgba(0, 200, 200, 0.10)";
+    for (let y = 0; y < SIZE; y++) {
+      for (let x = 0; x < SIZE; x++) {
+        if (board[y][x] === 2) {
+          const dirs = [
+            [1, 0], [-1, 0], [0, 1], [0, -1],
+            [1, 1], [1, -1], [-1, 1], [-1, -1]
+          ];
+          for (const [dx, dy] of dirs) {
+            let cx = x + dx;
+            let cy = y + dy;
+            while (cx >= 0 && cx < SIZE && cy >= 0 && cy < SIZE) {
+              ctx.fillRect(cx * CELL + 0.5, cy * CELL + 0.5, CELL - 1, CELL - 1);
+              if (board[cy][cx] === 1) break; // blocked by beast only
+              cx += dx;
+              cy += dy;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  function getCellFromEvent(evt) {
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor((evt.clientX - rect.left) / CELL);
+    const y = Math.floor((evt.clientY - rect.top) / CELL);
+    if (x < 0 || x >= SIZE || y < 0 || y >= SIZE) return null;
+    return { x, y };
+  }
+
+  // ---------------- King / groups ----------------
+
+  function getBlackGroups() {
+    const visited = Array.from({ length: SIZE }, () => Array(SIZE).fill(false));
+    const groups = [];
+    let gid = 0;
+
+    for (let y = 0; y < SIZE; y++) {
+      for (let x = 0; x < SIZE; x++) {
+        if (board[y][x] === 1 && !visited[y][x]) {
+          gid++;
+          const queue = [{ x, y }];
+          visited[y][x] = true;
+          const cells = [];
+
+          while (queue.length) {
+            const c = queue.shift();
+            cells.push(c);
+            const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+            for (const [dx, dy] of dirs) {
+              const nx = c.x + dx;
+              const ny = c.y + dy;
+              if (nx >= 0 && nx < SIZE && ny >= 0 && ny < SIZE) {
+                if (!visited[ny][nx] && board[ny][nx] === 1) {
+                  visited[ny][nx] = true;
+                  queue.push({ x: nx, y: ny });
+                }
+              }
+            }
+          }
+
+          const frontierSet = new Set();
+          for (const c of cells) {
+            const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+            for (const [dx, dy] of dirs) {
+              const nx = c.x + dx;
+              const ny = c.y + dy;
+              if (nx >= 0 && nx < SIZE && ny >= 0 && ny < SIZE) {
+                if (board[ny][nx] === 0) {
+                  frontierSet.add(ny * SIZE + nx);
+                }
+              }
+            }
+          }
+
+          const frontier = Array.from(frontierSet).map(i => ({
+            x: i % SIZE,
+            y: Math.floor(i / SIZE),
+          }));
+
+          if (frontier.length > 0) {
+            groups.push({ id: gid, frontier, used: false });
+          }
+        }
+      }
+    }
+    return groups;
+  }
+
+  function getKingGroup() {
+    if (kingX == null || kingY == null) return [];
+    if (board[kingY][kingX] !== 1) return [];
+    const visited = Array.from({ length: SIZE }, () => Array(SIZE).fill(false));
+    const queue = [{ x: kingX, y: kingY }];
+    const cells = [];
+    visited[kingY][kingX] = true;
+
+    while (queue.length) {
+      const c = queue.shift();
+      cells.push(c);
+      const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      for (const [dx, dy] of dirs) {
+        const nx = c.x + dx;
+        const ny = c.y + dy;
+        if (nx >= 0 && nx < SIZE && ny >= 0 && ny < SIZE) {
+          if (!visited[ny][nx] && board[ny][nx] === 1) {
+            visited[ny][nx] = true;
+            queue.push({ x: nx, y: ny });
+          }
+        }
+      }
+    }
+    return cells;
+  }
+
+  function kingGroupHasGrowth() {
+    const group = getKingGroup();
+    if (group.length === 0) return false;
+    for (const c of group) {
+      const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      for (const [dx, dy] of dirs) {
+        const nx = c.x + dx;
+        const ny = c.y + dy;
+        if (nx >= 0 && nx < SIZE && ny >= 0 && ny < SIZE) {
+          if (board[ny][nx] === 0) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function kingGroupHasEdge() {
+    const group = getKingGroup();
+    for (const c of group) {
+      if (c.x === 0 || c.x === SIZE - 1 || c.y === 0 || c.y === SIZE - 1)
+        return true;
+    }
+    return false;
+  }
+
+  function updateKingAfterPlacement(px, py) {
+    // Move crown to this stone if it is connected (orth) to the existing king
+    if (kingX == null || kingY == null) {
+      kingX = px;
+      kingY = py;
+      return;
+    }
+    const visited = Array.from({ length: SIZE }, () => Array(SIZE).fill(false));
+    const queue = [{ x: px, y: py }];
+    visited[py][px] = true;
+    let connects = false;
+
+    while (queue.length) {
+      const c = queue.shift();
+      if (c.x === kingX && c.y === kingY) {
+        connects = true;
+        break;
+      }
+      const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      for (const [dx, dy] of dirs) {
+        const nx = c.x + dx;
+        const ny = c.y + dy;
+        if (nx >= 0 && nx < SIZE && ny >= 0 && ny < SIZE) {
+          if (!visited[ny][nx] && board[ny][nx] === 1) {
+            visited[ny][nx] = true;
+            queue.push({ x: nx, y: ny });
+          }
+        }
+      }
+    }
+
+    if (connects) {
+      kingX = px;
+      kingY = py;
+    }
+  }
+
+  // ---------------- Black turn ----------------
+
+  function startBlackTurn() {
+    originalGroups = getBlackGroups();
+    placementsRemaining = originalGroups.length;
+
+    if (placementsRemaining === 0) {
+      if (!kingGroupHasGrowth()) {
+        setStatus("White wins: king-group cannot grow.");
+        gameOver = true;
+        draw();
+        return;
+      }
+    } else {
+      setStatus(
+        humanPlays === "black"
+          ? `Black (You): place ${placementsRemaining} stone(s).`
+          : `Black (AI): placing ${placementsRemaining} stone(s).`
+      );
+    }
+    draw();
+    maybeRunAI();
+  }
+
+  function handleBlackClick(x, y) {
+    if (placementsRemaining <= 0 || board[y][x] !== 0) return;
+
+    const groupsUsed = [];
+    for (const g of originalGroups) {
+      if (g.used) continue;
+      if (g.frontier.some(p => p.x === x && p.y === y)) {
+        groupsUsed.push(g);
+      }
+    }
+    if (groupsUsed.length === 0) return;
+
+    board[y][x] = 1;
+    updateKingAfterPlacement(x, y);
+
+    if (kingGroupHasEdge()) {
+      draw();
+      setStatus("Black wins: king-group reached the edge.");
+      gameOver = true;
+      return;
+    }
+
+    for (const g of groupsUsed) g.used = true;
+    placementsRemaining -= groupsUsed.length;
+
+    if (placementsRemaining > 0) {
+      setStatus(
+        humanPlays === "black"
+          ? `Black (You): place ${placementsRemaining} stone(s).`
+          : `Black (AI): placing ${placementsRemaining} stone(s).`
+      );
+      draw();
+      return;
+    }
+
+    if (!kingGroupHasGrowth()) {
+      draw();
+      setStatus("White wins: king-group cannot grow.");
+      gameOver = true;
+      return;
+    }
+
+    currentPlayer = "white";
+    selectedWhite = null;
+    setStatus(
+      humanPlays === "white"
+        ? "White (You) to move."
+        : "White (AI) to move."
+    );
+    draw();
+    maybeRunAI();
+  }
+
+  // ---------------- White movement & capture ----------------
+
+  function canWhiteMove(from, x, y) {
+    if (board[y][x] !== 0) return false;
+    const dx = x - from.x;
+    const dy = y - from.y;
+    if (!(dx === 0 || dy === 0 || Math.abs(dx) === Math.abs(dy))) return false;
+
+    const stepX = dx === 0 ? 0 : (dx > 0 ? 1 : -1);
+    const stepY = dy === 0 ? 0 : (dy > 0 ? 1 : -1);
+
+    let cx = from.x + stepX;
+    let cy = from.y + stepY;
+    while (cx !== x || cy !== y) {
+      if (board[cy][cx] === 1) return false; // cannot pass through beasts
+      cx += stepX; cy += stepY;
+    }
+    return true;
+  }
+
+  function applyCustodialCapture(fromX, fromY) {
+    const dirs = [
+      [1, 0], [-1, 0], [0, 1], [0, -1],
+      [1, 1], [1, -1], [-1, 1], [-1, -1]
+    ];
+
+    for (const [dx, dy] of dirs) {
+      const mx = fromX + dx;
+      const my = fromY + dy;
+      const ax = mx + dx;
+      const ay = my + dy;
+
+      if (
+        mx < 0 || mx >= SIZE || my < 0 || my >= SIZE ||
+        ax < 0 || ax >= SIZE || ay < 0 || ay >= SIZE
+      ) continue;
+
+      if (board[my][mx] === 1 && board[ay][ax] === 2) {
+        // Crown is invulnerable
+        if (mx === kingX && my === kingY) continue;
+        board[my][mx] = 2;
+      }
+    }
+  }
+
+  function performWhiteMove(fromX, fromY, toX, toY) {
+    board[toY][toX] = 2;
+    board[fromY][fromX] = 0;
+
+    applyCustodialCapture(toX, toY);
+    draw();
+    if (gameOver) return;
+
+    if (!kingGroupHasGrowth()) {
+      setStatus("White wins: king-group cannot grow.");
+      gameOver = true;
+      return;
+    }
+
+    currentPlayer = "black";
+    startBlackTurn();
+  }
+
+  function handleWhiteClick(x, y) {
+    if (!selectedWhite) {
+      if (board[y][x] === 2) {
+        selectedWhite = { x, y };
+        setStatus("White: choose a destination.");
+        draw();
+      }
+      return;
+    }
+
+    if (selectedWhite.x === x && selectedWhite.y === y) {
+      selectedWhite = null;
+      setStatus("White to move.");
+      draw();
+      return;
+    }
+
+    if (!canWhiteMove(selectedWhite, x, y)) return;
+
+    const from = { x: selectedWhite.x, y: selectedWhite.y };
+    selectedWhite = null;
+    performWhiteMove(from.x, from.y, x, y);
+  }
+
+  // ---------------- AI turn scheduling ----------------
+
+  function maybeRunAI() {
+    if (gameOver) return;
+    if (currentPlayer !== humanPlays) {
+      setTimeout(runAITurn, 150);
+    }
+  }
+
+  function runAITurn() {
+    if (gameOver) return;
+    if (currentPlayer === humanPlays) return;
+
+    if (currentPlayer === "white") {
+      aiWhiteMove();
+    } else {
+      aiBlackTurn();
+    }
+  }
+
+  // --- AI White ---
+
+  // Generate all legal queen moves for White
+  function generateAllWhiteMoves() {
+    const moves = [];
+    for (let y = 0; y < SIZE; y++) {
+      for (let x = 0; x < SIZE; x++) {
+        if (board[y][x] === 2) {
+          const dirs = [
+            [1, 0], [-1, 0], [0, 1], [0, -1],
+            [1, 1], [1, -1], [-1, 1], [-1, -1]
+          ];
+          for (const [dx, dy] of dirs) {
+            let cx = x + dx;
+            let cy = y + dy;
+            while (cx >= 0 && cx < SIZE && cy >= 0 && cy < SIZE) {
+              if (board[cy][cx] === 1) break; // beast blocks ray
+              if (board[cy][cx] === 0) {
+                // empty square = legal landing
+                if (canWhiteMove({x,y}, cx, cy)) {
+                  moves.push({ fromX: x, fromY: y, toX: cx, toY: cy });
+                }
+              }
+              // if it's white, we can continue scanning beyond
+              cx += dx; cy += dy;
+            }
+          }
+        }
+      }
+    }
+    return moves;
+  }
+
+  // Very rough check: is a white stone adjacent to any beast?
+  function couldBeFlippedByBlack(x, y) {
+    const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+    for (const [dx,dy] of dirs) {
+      const nx = x + dx, ny = y + dy;
+      if (nx>=0 && nx<SIZE && ny>=0 && ny<SIZE && board[ny][nx] === 1) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function countFlipsAt(toX, toY, fromX, fromY) {
+    // Temporarily simulate
+    board[fromY][fromX] = 0;
+    board[toY][toX] = 2;
+
+    let count = 0;
+    const dirs = [
+      [1, 0], [-1, 0], [0, 1], [0, -1],
+      [1, 1], [1, -1], [-1, 1], [-1, -1]
+    ];
+    for (const [dx, dy] of dirs) {
+      const mx = toX + dx;
+      const my = toY + dy;
+      const ax = mx + dx;
+      const ay = my + dy;
+      if (
+        mx < 0 || mx >= SIZE || my < 0 || my >= SIZE ||
+        ax < 0 || ax >= SIZE || ay < 0 || ay >= SIZE
+      ) continue;
+      if (board[my][mx] === 1 && board[ay][ax] === 2) {
+        if (mx === kingX && my === kingY) continue; // king can't be flipped
+        count++;
+      }
+    }
+
+    // revert
+    board[toY][toX] = 0;
+    board[fromY][fromX] = 2;
+    return count;
+  }
+
+  // Shortest orthogonal path from king-group to edge, through empty/beast
+  function computeEscapeDistance() {
+    const kg = getKingGroup();
+    if (kg.length === 0) return 999;
+
+    const visited = Array.from({length: SIZE}, () => Array(SIZE).fill(false));
+    const q = [];
+
+    for (const c of kg) {
+      q.push({x: c.x, y: c.y, d: 0});
+      visited[c.y][c.x] = true;
+    }
+
+    const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+
+    while (q.length > 0) {
+      const cur = q.shift();
+
+      if (
+        cur.x === 0 || cur.x === SIZE-1 ||
+        cur.y === 0 || cur.y === SIZE-1
+      ) {
+        return cur.d;
+      }
+
+      for (const [dx,dy] of dirs) {
+        const nx = cur.x + dx;
+        const ny = cur.y + dy;
+        if (nx<0||nx>=SIZE||ny<0||ny>=SIZE) continue;
+        if (visited[ny][nx]) continue;
+        if (board[ny][nx] === 2) continue; // white blocks
+
+        visited[ny][nx] = true;
+        q.push({x: nx, y: ny, d: cur.d + 1});
+      }
+    }
+
+    return 999;
+  }
+
+  // Escape distance AFTER hypothetical white move
+  function simulateWhiteMoveEscapeDistance(fromX, fromY, toX, toY) {
+    board[fromY][fromX] = 0;
+    board[toY][toX] = 2;
+
+    let d = computeEscapeDistance();
+    if (!Number.isFinite(d) || d < 0) d = 999;
+
+    board[toY][toX] = 0;
+    board[fromY][fromX] = 2;
+
+    return d;
+  }
+
+  function aiWhiteMove() {
+    const moves = generateAllWhiteMoves();
+    if (moves.length === 0) {
+      currentPlayer = "black";
+      startBlackTurn();
+      return;
+    }
+
+    let best = null;
+    let bestScore = -Infinity;
+
+    const D0 = computeEscapeDistance();
+
+    const kg = getKingGroup();
+    let frontierCells = [];
+    {
+      const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+      for (const c of kg) {
+        for (const [dx,dy] of dirs) {
+          const nx = c.x + dx, ny = c.y + dy;
+          if (nx>=0 && nx<SIZE && ny>=0 && ny<SIZE && board[ny][nx]===0) {
+            frontierCells.push({x:nx,y:ny});
+          }
+        }
+      }
+    }
+
+    for (const m of moves) {
+      const { fromX, fromY, toX, toY } = m;
+
+      let Dm = simulateWhiteMoveEscapeDistance(fromX, fromY, toX, toY);
+      if (!Number.isFinite(Dm) || Dm < 0) Dm = 999;
+
+      let score = 0;
+
+      // Path-based: extend escape distance
+      score += (Dm - D0) * 200;
+      if (Dm < D0) score -= 400;
+
+      // Flips
+      const flips = countFlipsAt(toX, toY, fromX, fromY);
+      score += flips * 40;
+
+      // Frontier pressure
+      let bestDist = 999;
+      for (const f of frontierCells) {
+        const d = Math.abs(f.x - toX) + Math.abs(f.y - toY);
+        if (d < bestDist) bestDist = d;
+      }
+      const cappedDist = Math.min(bestDist, 10);
+      score -= cappedDist * 3;
+
+      for (const f of frontierCells) {
+        if (f.x === toX && f.y === toY) score += 150;
+      }
+
+      if (bestDist === 1) score += 20;
+
+      // Avoid dangerous adjacency
+      if (couldBeFlippedByBlack(toX, toY)) score -= 80;
+
+      if (!Number.isFinite(score)) score = -9999;
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = m;
+      }
+    }
+
+    if (!best) {
+      console.warn("White AI fallback move triggered.");
+      best = moves[0];
+    }
+
+    performWhiteMove(best.fromX, best.fromY, best.toX, best.toY);
+  }
+
+  // --- AI Black ---
+
+  function generateLegalBlackPlacements() {
+    const seen = new Set();
+    const result = [];
+    for (const g of originalGroups) {
+      if (g.used) continue;
+      for (const p of g.frontier) {
+        const idx = p.y * SIZE + p.x;
+        if (seen.has(idx)) continue;
+        if (board[p.y][p.x] === 0) {
+          seen.add(idx);
+          result.push({ x: p.x, y: p.y });
+        }
+      }
+    }
+    return result;
+  }
+
+  function scoreBlackPlacement(p) {
+    let score = 0;
+
+    // Distance to edge
+    const distEdge = Math.min(p.x, SIZE-1-p.x, p.y, SIZE-1-p.y);
+    score += (SIZE - distEdge) * 10;
+
+    // Adjacent to king-group
+    const kCells = getKingGroup();
+    let adjacentToKing = false;
+    for (const c of kCells) {
+      if (Math.abs(c.x - p.x) + Math.abs(c.y - p.y) === 1)
+        adjacentToKing = true;
+    }
+    if (adjacentToKing) score += 30;
+
+    // Merges groups (rough bonus)
+    for (const g of originalGroups) {
+      if (g.used) continue;
+      if (g.frontier.some(f => f.x === p.x && f.y === p.y)) {
+        if (g.frontier.length > 1) score += 15;
+      }
+    }
+
+    // Penalty if landing in white LOS
+    if (whiteSees(p.x, p.y)) score -= 50;
+
+    return score;
+  }
+
+  function whiteSees(x, y) {
+    const dirs = [
+      [1,0],[-1,0],[0,1],[0,-1],
+      [1,1],[1,-1],[-1,1],[-1,-1]
+    ];
+    for (let wy=0; wy<SIZE; wy++) {
+      for (let wx=0; wx<SIZE; wx++) {
+        if (board[wy][wx] !== 2) continue;
+        for (const [dx,dy] of dirs) {
+          let cx = wx + dx, cy = wy + dy;
+          while (cx>=0&&cx<SIZE&&cy>=0&&cy<SIZE) {
+            if (cx === x && cy === y) return true;
+            if (board[cy][cx] === 1) break;
+            cx += dx; cy += dy;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  function aiBlackTurn() {
+    while (!gameOver &&
+           currentPlayer === "black" &&
+           placementsRemaining > 0) {
+
+      const legal = generateLegalBlackPlacements();
+      if (legal.length === 0) break;
+
+      let best = null;
+      let bestScore = -Infinity;
+
+      for (const p of legal) {
+        const s = scoreBlackPlacement(p);
+        if (s > bestScore) {
+          bestScore = s;
+          best = p;
+        }
+      }
+
+      handleBlackClick(best.x, best.y);
+    }
+  }
+
+  // ---------------- Events ----------------
+
+  canvas.addEventListener("click", evt => {
+    if (gameOver) return;
+    if (currentPlayer !== humanPlays) return;
+
+    const cell = getCellFromEvent(evt);
+    if (!cell) return;
+    const { x, y } = cell;
+
+    if (currentPlayer === "white") {
+      handleWhiteClick(x, y);
+    } else {
+      handleBlackClick(x, y);
+    }
+  });
+
+  resetBtn.addEventListener("click", initBoard);
+
+  btnPlayWhite.addEventListener("click", () => {
+    humanPlays = "white";
+    setStatus("Click Start / Reset to play as White.");
+  });
+
+  btnPlayBlack.addEventListener("click", () => {
+    humanPlays = "black";
+    setStatus("Click Start / Reset to play as Black.");
+  });
+
+  setStatus("Choose a side and white setup, then press Start / Reset.");
+  </script>
+</body>
+</html>
