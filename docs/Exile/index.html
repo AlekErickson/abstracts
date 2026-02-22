@@ -1,0 +1,1041 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Hex Stones — Captures + Triangle Ban + Perilous Placement + Simultaneous Resolution Protection (No-Pass End)</title>
+  <style>
+    :root { --bg:#ffffff; --panel:#fbf8f1; --text:#1d140b; --muted:#6a5436; --warn:#9a5e12; --bad:#a22b2b; }
+    body { margin:0; font-family: Helvetica, Arial, sans-serif; background:var(--bg); color:var(--text); }
+    .wrap { display:grid; grid-template-columns: 360px minmax(0,1fr); gap:16px; padding:16px; align-items:start; max-width:1400px; margin:0 auto; }
+    .panel { background:var(--panel); border-radius:14px; padding:12px 14px; border:1px solid rgba(110,76,36,.16); box-shadow: 0 8px 24px rgba(70,43,16,.08); position:sticky; top:16px; max-height:calc(100vh - 32px); overflow:auto; }
+    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:8px 0; }
+    .row.stack { display:grid; gap:6px; }
+    label { color:var(--muted); font-size:13px; }
+    select, input[type="number"] { width:100%; padding:6px 8px; border-radius:10px; border:1px solid rgba(74,49,20,.2); background:#fffaf1; color:var(--text); font:inherit; }
+    .pair { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+    button { padding:8px 10px; border-radius:10px; border:1px solid rgba(74,49,20,.2); background:linear-gradient(180deg,#fff8ea,#f1dec0); color:var(--text); cursor:pointer; font:inherit; }
+    button:hover { filter:brightness(1.08); }
+    button:disabled { opacity:.55; cursor:not-allowed; }
+    .status { font-size:14px; line-height:1.35; }
+    .status b { font-weight:700; }
+    .legend { display:flex; gap:10px; align-items:center; flex-wrap:wrap; color:var(--muted); font-size:13px; margin-top:10px; }
+    .dot { width:12px; height:12px; border-radius:999px; display:inline-block; border:1px solid rgba(74,49,20,.25); }
+    .dot.white { background:#f2f2f2; }
+    .dot.black { background:#0d0d0d; }
+    .dot.terW { background:rgba(242,242,242,.55); }
+    .dot.terB { background:rgba(13,13,13,.35); }
+    .boardPane { background:#f5f1e8; border-radius:18px; border:1px solid rgba(110,76,36,.12); box-shadow: 0 8px 24px rgba(70,43,16,.06); padding:10px; }
+    svg { background:#fbf1de; border-radius:12px; box-shadow: 0 12px 32px rgba(70,43,16,.10); width:100%; height:auto; display:block; }
+    .hex { stroke:rgba(110,110,110,.9); stroke-width:1; fill:#d39d5f; cursor:pointer; }
+    .hex:hover { filter:brightness(1.12); }
+    .hex.illegal { fill:#cb9458; cursor:not-allowed; opacity:0.72; }
+    .hex.occupied { cursor:default; }
+    .stone.white { stroke:#bdbdbd; stroke-width:1.1; pointer-events:none; }
+    .stone.black { stroke:#4a4a4a; stroke-width:1.1; pointer-events:none; }
+    .territoryDot.w { fill: rgba(255,255,255,.26); pointer-events:none; }
+    .territoryDot.b { fill: rgba(0,0,0,.20); pointer-events:none; }
+    .territoryDot.n { fill: rgba(140,90,40,.12); pointer-events:none; }
+    .msg { margin-top:10px; min-height:18px; font-size:13px; color:var(--muted); }
+    .msg.warn { color:var(--warn); }
+    .msg.bad { color:var(--bad); }
+    .small { color:var(--muted); font-size:12px; margin-top:8px; line-height:1.35; }
+    .testbox { margin-top:10px; min-height:18px; font-size:13px; color:var(--muted); line-height:1.35; }
+    @media (max-width: 980px) {
+      .wrap { grid-template-columns: 1fr; }
+      .panel { position:static; max-height:none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel">
+      <div class="status" id="status"></div>
+
+      <div class="row stack">
+        <label for="opponentMode">Opponent</label>
+        <select id="opponentMode">
+          <option value="hvh">Human vs Human</option>
+          <option value="random">Human vs Random</option>
+          <option value="mcts">Human vs MCTS</option>
+        </select>
+      </div>
+
+      <div class="pair">
+        <div class="row stack" style="margin:8px 0 0;">
+          <label for="radius">Board radius</label>
+          <input id="radius" type="number" min="1" max="12" value="5" />
+        </div>
+        <div class="row stack" style="margin:8px 0 0;">
+          <label for="hexSize">Hex size</label>
+          <input id="hexSize" type="number" min="14" max="60" value="28" />
+        </div>
+      </div>
+
+      <div class="row">
+        <button id="newGame">New game</button>
+        <button id="undo">Undo</button>
+        <button id="clear">Clear</button>
+      </div>
+
+      <div class="row">
+        <button id="randomPlayout">Random playout</button>
+        <button id="test100">Test x100</button>
+      </div>
+
+      <div class="legend">
+        <span class="dot white"></span> White
+        <span class="dot black"></span> Black
+        <span class="dot terW"></span> Region advantage (W)
+        <span class="dot terB"></span> Region advantage (B)
+      </div>
+
+      <div class="msg" id="msg"></div>
+      <div class="testbox" id="testBox"></div>
+
+      <div class="small">
+        First move: White’s very first move must be on a board corner.<br/>
+        Triangle ban: illegal if your move creates any minimal 3-hex triangle (colors don’t matter).<br/>
+        Dead region: an empty region with <b>no legal placements inside it</b> (triangle ban only). When a region becomes dead, it resolves; removals use simultaneous-resolution protection.<br/>
+        Tie rule: if a region resolves with a <b>tie</b> in adjacent stones, the <b>opponent of the player whose move created the deadlock</b> wins the tie.<br/>
+        Perilous placement: simulate the full resolution cascade for a candidate move; only the winner of the largest resolving region size is allowed to have made the move; if max-size winners conflict, the cell is mutually perilous (illegal). If no region resolves, no peril restriction.<br/>
+        Simultaneous resolution protection: in each wave of newly-deadlocked regions, a stone is removed only if the largest opponent-won region touching it is strictly larger than the largest same-color-won region touching it in that wave (ties protect).<br/>
+        Game end: if the player to move has <b>no legal moves</b>, the game ends immediately and is scored.<br/>
+        Scoring: <b>final position only</b> (no interim points).
+      </div>
+    </div>
+
+    <div class="boardPane">
+      <svg id="board" width="860" height="720" viewBox="0 0 860 720" aria-label="Hex board"></svg>
+    </div>
+  </div>
+
+  <script>
+    const SQRT3 = Math.sqrt(3);
+    const svg = document.getElementById("board");
+    const statusEl = document.getElementById("status");
+    const msgEl = document.getElementById("msg");
+    const testBoxEl = document.getElementById("testBox");
+    const radiusInput = document.getElementById("radius");
+    const hexSizeInput = document.getElementById("hexSize");
+    const opponentModeEl = document.getElementById("opponentMode");
+
+    const newBtn = document.getElementById("newGame");
+    const undoBtn = document.getElementById("undo");
+    const clearBtn = document.getElementById("clear");
+    const randomBtn = document.getElementById("randomPlayout");
+    const testBtn = document.getElementById("test100");
+
+    const DIRS = [
+      {q: 1, r: 0},
+      {q: 1, r:-1},
+      {q: 0, r:-1},
+      {q:-1, r: 0},
+      {q:-1, r: 1},
+      {q: 0, r: 1},
+    ];
+
+    let boardRadius = parseInt(radiusInput.value, 10);
+    let hexSize = parseInt(hexSizeInput.value, 10);
+
+    let coords = [];
+    let coordSet = new Set();
+    let centers = new Map();
+
+    // main state
+    let stones = new Map();   // key -> "W"|"B"
+    let turn = "W";
+
+    // derived
+    let legalMoves = [];
+    let territoryByCell = new Map();
+    let regionDeadState = new Map();
+    let lastEvents = [];
+    let history = [];
+    let uiBusy = false;
+    let uiAnimating = false;
+    let aiThinking = false;
+    let aiTimer = null;
+    let suppressMessages = false;
+
+    function keyOf(q, r) { return `${q},${r}`; }
+    function parseKey(k) { const [q,r] = k.split(",").map(Number); return {q,r}; }
+    function sleep(ms) { return new Promise(res => setTimeout(res, ms)); }
+    function currentController() {
+      if (opponentModeEl.value === "hvh") return "human";
+      if (turn === "W") return "human";
+      return opponentModeEl.value === "random" ? "random" : "mcts";
+    }
+    function canHumanInteract() {
+      return !uiBusy && !uiAnimating && !aiThinking && currentController() === "human";
+    }
+    function positionHash() {
+      const keys = Array.from(stones.entries()).sort((a,b)=>a[0].localeCompare(b[0]));
+      return turn + "|" + keys.length + "|" + keys.map(([kk,v]) => kk + v).join(";");
+    }
+    function fullSnapshot() {
+      return {
+        stones: new Map(stones),
+        turn,
+        regionDeadState: new Map(regionDeadState),
+        lastEvents: lastEvents.slice(),
+        legalMoves: legalMoves.slice(),
+        territoryByCell: new Map(territoryByCell),
+        msgText: msgEl.textContent,
+        msgClass: msgEl.className,
+      };
+    }
+    function fullRestore(snap) {
+      stones = new Map(snap.stones);
+      turn = snap.turn;
+      regionDeadState = new Map(snap.regionDeadState);
+      lastEvents = snap.lastEvents.slice();
+      legalMoves = snap.legalMoves.slice();
+      territoryByCell = new Map(snap.territoryByCell);
+      msgEl.className = snap.msgClass;
+      msgEl.textContent = snap.msgText;
+    }
+
+    function axialToPixel(q, r, size) {
+      return { x: size * SQRT3 * (q + r / 2), y: size * 1.5 * r };
+    }
+
+    function hexPoints(cx, cy, size) {
+      const pts = [];
+      for (let i = 0; i < 6; i++) {
+        const ang = (Math.PI / 180) * (60 * i - 30);
+        pts.push(`${(cx + size*Math.cos(ang)).toFixed(3)},${(cy + size*Math.sin(ang)).toFixed(3)}`);
+      }
+      return pts.join(" ");
+    }
+
+    function inHexRadius(q, r, R) {
+      const x=q, z=r, y=-x-z;
+      return Math.max(Math.abs(x), Math.abs(y), Math.abs(z)) <= R;
+    }
+
+    function clearSvg() { while (svg.firstChild) svg.removeChild(svg.firstChild); }
+
+    function fitToView(allCenters) {
+      let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+      for (const c of allCenters) {
+        minX = Math.min(minX, c.x - hexSize);
+        minY = Math.min(minY, c.y - hexSize);
+        maxX = Math.max(maxX, c.x + hexSize);
+        maxY = Math.max(maxY, c.y + hexSize);
+      }
+      const w = svg.viewBox.baseVal.width;
+      const h = svg.viewBox.baseVal.height;
+      const boardW = maxX - minX;
+      const boardH = maxY - minY;
+      return { offsetX: (w-boardW)/2 - minX, offsetY: (h-boardH)/2 - minY };
+    }
+
+    function rebuildBoardCache() {
+      coords = [];
+      coordSet = new Set();
+      centers = new Map();
+
+      for (let q=-boardRadius; q<=boardRadius; q++) {
+        for (let r=-boardRadius; r<=boardRadius; r++) {
+          if (inHexRadius(q,r,boardRadius)) {
+            const k = keyOf(q,r);
+            coords.push({q,r});
+            coordSet.add(k);
+          }
+        }
+      }
+      const rawCenters = coords.map(({q,r}) => axialToPixel(q,r,hexSize));
+      const {offsetX, offsetY} = fitToView(rawCenters);
+
+      for (const {q,r} of coords) {
+        const c = axialToPixel(q,r,hexSize);
+        centers.set(keyOf(q,r), { cx: c.x + offsetX, cy: c.y + offsetY });
+      }
+    }
+
+    function neighborsOfKey(k) {
+      const {q,r} = parseKey(k);
+      const out = [];
+      for (const d of DIRS) {
+        const nk = keyOf(q+d.q, r+d.r);
+        if (coordSet.has(nk)) out.push(nk);
+      }
+      return out;
+    }
+
+    function wouldCreateTriangleAt(stonesMap, q, r) {
+      const occ = (kk) => stonesMap.has(kk);
+      for (let i=0;i<6;i++) {
+        const d1 = DIRS[i], d2 = DIRS[(i+1)%6];
+        const k1 = keyOf(q+d1.q, r+d1.r);
+        const k2 = keyOf(q+d2.q, r+d2.r);
+        if (coordSet.has(k1) && coordSet.has(k2) && occ(k1) && occ(k2)) return true;
+      }
+      return false;
+    }
+
+    // Regions + dead definition uses triangle-ban-only legality.
+    function computeRegionsPreviewFor(stonesMap) {
+      const visited = new Set();
+      const regions = [];
+      const territory = new Map();
+
+      const isLegalInSim = (cellKey) => {
+        if (stonesMap.has(cellKey)) return false;
+        const {q,r} = parseKey(cellKey);
+        return !wouldCreateTriangleAt(stonesMap, q, r);
+      };
+
+      for (const {q,r} of coords) {
+        const start = keyOf(q,r);
+        if (visited.has(start)) continue;
+        if (stonesMap.has(start)) continue;
+
+        const stack = [start];
+        visited.add(start);
+
+        const cells = [];
+        const adjW = new Set();
+        const adjB = new Set();
+        let hasLegal = false;
+
+        while (stack.length) {
+          const ck = stack.pop();
+          cells.push(ck);
+          if (!hasLegal && isLegalInSim(ck)) hasLegal = true;
+
+          for (const nk of neighborsOfKey(ck)) {
+            if (stonesMap.has(nk)) {
+              const c = stonesMap.get(nk);
+              if (c === "W") adjW.add(nk); else adjB.add(nk);
+            } else if (!visited.has(nk)) {
+              visited.add(nk);
+              stack.push(nk);
+            }
+          }
+        }
+
+        const sig = cells.slice().sort().join("|");
+        const wAdj = adjW.size, bAdj = adjB.size;
+
+        let adv = "N";
+        if (wAdj > bAdj) adv = "W";
+        else if (bAdj > wAdj) adv = "B";
+        for (const ck of cells) territory.set(ck, adv);
+
+        regions.push({ sig, cells, size: cells.length, adjW, adjB, wAdj, bAdj, adv, dead: !hasLegal });
+      }
+
+      return { regions, territory };
+    }
+
+    function oppositeColor(c) { return c === "W" ? "B" : "W"; }
+
+    // Resolution cascade with simultaneous protection per "wave".
+    function resolveCascadeOn(stonesMap, deadStateMap, closerColor=null) {
+      const events = [];
+      let safety = 200;
+
+      while (safety-- > 0) {
+        const prevDead = deadStateMap;
+        const { regions } = computeRegionsPreviewFor(stonesMap);
+
+        const deadNow = new Map();
+        for (const r of regions) deadNow.set(r.sig, r.dead);
+
+        const triggers = regions.filter(r => r.dead && prevDead.get(r.sig) !== true);
+        deadStateMap = deadNow;
+        if (triggers.length === 0) break;
+
+        const regionOutcomes = triggers.map(r => {
+          let winner = "N";
+          if (r.wAdj > r.bAdj) winner = "W";
+          else if (r.bAdj > r.wAdj) winner = "B";
+          else {
+            if (closerColor === "W" || closerColor === "B") winner = oppositeColor(closerColor);
+            else winner = "N";
+          }
+          return { r, winner };
+        });
+
+        const maxWin = new Map();   // stoneKey -> size
+        const maxLose = new Map();  // stoneKey -> size
+        const touched = new Set();
+
+        function bumpMax(map, k, val) {
+          const cur = map.get(k);
+          if (cur === undefined || val > cur) map.set(k, val);
+        }
+
+        for (const { r, winner } of regionOutcomes) {
+          if (winner !== "W" && winner !== "B") continue;
+          const sz = r.size;
+
+          for (const sk of r.adjW) {
+            if (stonesMap.get(sk) !== "W") continue;
+            touched.add(sk);
+            if (winner === "W") bumpMax(maxWin, sk, sz);
+            else bumpMax(maxLose, sk, sz);
+          }
+          for (const sk of r.adjB) {
+            if (stonesMap.get(sk) !== "B") continue;
+            touched.add(sk);
+            if (winner === "B") bumpMax(maxWin, sk, sz);
+            else bumpMax(maxLose, sk, sz);
+          }
+        }
+
+        const toRemove = [];
+        for (const sk of touched) {
+          const w = (maxWin.get(sk) ?? -1);
+          const d = (maxLose.get(sk) ?? -1);
+          if (d > w) toRemove.push(sk);
+        }
+
+        for (const sk of toRemove) stonesMap.delete(sk);
+
+        for (const { r, winner } of regionOutcomes) {
+          events.push({ regionSize:r.size, wAdj:r.wAdj, bAdj:r.bAdj, winner, removed: toRemove.length, tie: (r.wAdj===r.bAdj) });
+        }
+      }
+
+      return { stonesMap, deadStateMap, events, safetyOk: safety > 0 };
+    }
+
+    function setMsg(text, kind="") {
+      if (suppressMessages) return;
+      msgEl.className = "msg" + (kind ? ` ${kind}` : "");
+      msgEl.textContent = text || "";
+    }
+
+    function countStones() {
+      let w=0,b=0;
+      for (const v of stones.values()) (v==="W") ? w++ : b++;
+      return {w,b};
+    }
+
+    // Game is terminal if current player has no legal moves.
+    function terminalNoMovesCurrent() {
+      return computeLegalMovesFor(turn).length === 0;
+    }
+
+    // Final-only scoring: score every empty region in the terminal position by adjacency majority (ties score 0).
+    function computeFinalScore() {
+      const { regions } = computeRegionsPreviewFor(stones);
+      const score = { W:0, B:0 };
+      for (const r of regions) {
+        if (r.wAdj > r.bAdj) score.W += r.size;
+        else if (r.bAdj > r.wAdj) score.B += r.size;
+      }
+      return score;
+    }
+
+    function updateStatus() {
+      const who = (turn==="W") ? "White" : "Black";
+      const st = countStones();
+      const lm = legalMoves.length;
+      const over = terminalNoMovesCurrent();
+
+      let html =
+        `Turn: <b>${who}</b><br/>` +
+        `Stones — White: <b>${st.w}</b>, Black: <b>${st.b}</b><br/>` +
+        `Legal moves available for current player: <b>${lm}</b>`;
+
+      if (over) {
+        const fs = computeFinalScore();
+        let winner = "Tie";
+        if (fs.W > fs.B) winner = "White wins";
+        else if (fs.B > fs.W) winner = "Black wins";
+        html += `<br/>Final score — White: <b>${fs.W}</b>, Black: <b>${fs.B}</b>`;
+        html += `<br/>Game over (no legal moves for ${who}): <b>${winner}</b>`;
+      } else {
+        html += `<br/>Final score: <b>pending</b>`;
+      }
+
+      statusEl.innerHTML = html;
+
+      const locked = uiBusy || uiAnimating || aiThinking;
+      undoBtn.disabled = locked || history.length === 0;
+      clearBtn.disabled = locked || stones.size === 0;
+      randomBtn.disabled = locked || over;
+      testBtn.disabled = locked;
+      newBtn.disabled = locked;
+      radiusInput.disabled = locked;
+      hexSizeInput.disabled = locked;
+      opponentModeEl.disabled = locked;
+    }
+
+    function renderBoard() {
+      clearSvg();
+
+      const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+      const blackGrad = document.createElementNS("http://www.w3.org/2000/svg", "radialGradient");
+      blackGrad.setAttribute("id", "blackStone");
+      blackGrad.setAttribute("cx", "35%");
+      blackGrad.setAttribute("cy", "30%");
+      blackGrad.setAttribute("r", "70%");
+      for (const [off, color] of [["0%", "#5a5a5a"], ["55%", "#222"], ["100%", "#050505"]]) {
+        const stop = document.createElementNS("http://www.w3.org/2000/svg", "stop");
+        stop.setAttribute("offset", off);
+        stop.setAttribute("stop-color", color);
+        blackGrad.appendChild(stop);
+      }
+      const whiteGrad = document.createElementNS("http://www.w3.org/2000/svg", "radialGradient");
+      whiteGrad.setAttribute("id", "whiteStone");
+      whiteGrad.setAttribute("cx", "35%");
+      whiteGrad.setAttribute("cy", "28%");
+      whiteGrad.setAttribute("r", "72%");
+      for (const [off, color] of [["0%", "#ffffff"], ["68%", "#ebebeb"], ["100%", "#cfcfcf"]]) {
+        const stop = document.createElementNS("http://www.w3.org/2000/svg", "stop");
+        stop.setAttribute("offset", off);
+        stop.setAttribute("stop-color", color);
+        whiteGrad.appendChild(stop);
+      }
+      defs.appendChild(blackGrad);
+      defs.appendChild(whiteGrad);
+      svg.appendChild(defs);
+
+      const hexLayer = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      const territoryLayer = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      const stoneLayer = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      svg.appendChild(hexLayer);
+      svg.appendChild(territoryLayer);
+      svg.appendChild(stoneLayer);
+
+      const legalSet = new Set(legalMoves);
+
+      for (const {q,r} of coords) {
+        const k = keyOf(q,r);
+        const {cx,cy} = centers.get(k);
+
+        const poly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+        let cls = "hex";
+        if (stones.has(k)) cls += " occupied";
+        else if (!legalSet.has(k)) cls += " illegal";
+        poly.setAttribute("class", cls);
+        poly.setAttribute("points", hexPoints(cx, cy, hexSize - 0.6));
+        poly.addEventListener("click", () => onHexClickKey(k));
+        hexLayer.appendChild(poly);
+
+        if (!stones.has(k)) {
+          const adv = territoryByCell.get(k) || "N";
+          const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          dot.setAttribute("cx", cx);
+          dot.setAttribute("cy", cy);
+          dot.setAttribute("r", Math.max(3, hexSize * 0.14));
+          dot.setAttribute("class", adv==="W" ? "territoryDot w" : adv==="B" ? "territoryDot b" : "territoryDot n");
+          territoryLayer.appendChild(dot);
+        }
+
+        if (stones.has(k)) {
+          const s = stones.get(k);
+          const circ = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          circ.setAttribute("cx", cx);
+          circ.setAttribute("cy", cy);
+          circ.setAttribute("r", Math.max(6, hexSize * 0.84));
+          circ.setAttribute("class", s==="W" ? "stone white" : "stone black");
+          circ.setAttribute("fill", s === "W" ? "url(#whiteStone)" : "url(#blackStone)");
+          stoneLayer.appendChild(circ);
+
+          const shine = document.createElementNS("http://www.w3.org/2000/svg", "ellipse");
+          shine.setAttribute("cx", cx - hexSize * 0.2);
+          shine.setAttribute("cy", cy - hexSize * 0.28);
+          shine.setAttribute("rx", Math.max(3, hexSize * 0.34));
+          shine.setAttribute("ry", Math.max(2, hexSize * 0.18));
+          shine.setAttribute("transform", `rotate(-18 ${cx} ${cy})`);
+          shine.setAttribute("fill", s === "W" ? "rgba(255,255,255,0.65)" : "rgba(255,255,255,0.14)");
+          shine.setAttribute("opacity", "0.75");
+          shine.setAttribute("pointer-events", "none");
+          stoneLayer.appendChild(shine);
+        }
+      }
+
+      updateStatus();
+    }
+
+    function snapshot() {
+      return {
+        stones: new Map(stones),
+        turn,
+        regionDeadState: new Map(regionDeadState),
+        lastEvents: lastEvents.slice(),
+      };
+    }
+
+    function restore(snap) {
+      stones = new Map(snap.stones);
+      turn = snap.turn;
+      regionDeadState = new Map(snap.regionDeadState);
+      lastEvents = snap.lastEvents.slice();
+    }
+
+    function computeTerritoryAndPreview() {
+      const { territory } = computeRegionsPreviewFor(stones);
+      territoryByCell = territory;
+    }
+
+    function resolveDeadRegionsCascadeMain(closerColor=null) {
+      const out = resolveCascadeOn(stones, regionDeadState, closerColor);
+
+      stones = out.stonesMap;
+      regionDeadState = out.deadStateMap;
+
+      if (!out.safetyOk) setMsg("Safety stop during region resolutions (possible loop).", "bad");
+
+      if (out.events.length) {
+        const e = out.events[out.events.length - 1];
+        const tieNote = e.tie ? " (tie → opponent of closer wins)" : "";
+        const msg = (e.winner === "N")
+          ? `Region resolved (size ${e.regionSize}): tie (${e.wAdj}-${e.bAdj}), no removals.`
+          : `Region resolved (size ${e.regionSize}): ${e.winner==="W"?"White":"Black"} wins adjacency (${e.wAdj}-${e.bAdj})${tieNote}, removed (this wave) ${e.removed}.`;
+        lastEvents.push(msg);
+        if (lastEvents.length > 4) lastEvents.shift();
+        setMsg(msg, "warn");
+      }
+    }
+
+    // --- Move legality ---
+
+    function isCornerKey(k) {
+      const corners = new Set([
+        keyOf(boardRadius, 0),
+        keyOf(boardRadius, -boardRadius),
+        keyOf(0, -boardRadius),
+        keyOf(-boardRadius, 0),
+        keyOf(-boardRadius, boardRadius),
+        keyOf(0, boardRadius),
+      ]);
+      return corners.has(k);
+    }
+
+    function passesPerilousPlacementRule(k, color) {
+      const simStones = new Map(stones);
+      simStones.set(k, color);
+
+      const simDead = new Map(regionDeadState);
+      const out = resolveCascadeOn(simStones, simDead, color);
+
+      const ev = out.events;
+      if (!ev.length) return { ok:true, reason:"" };
+
+      let maxSize = -1;
+      for (const e of ev) maxSize = Math.max(maxSize, e.regionSize);
+
+      const winnersAtMax = new Set(ev.filter(e => e.regionSize === maxSize).map(e => e.winner));
+      winnersAtMax.delete("N");
+
+      if (winnersAtMax.size !== 1) {
+        return { ok:false, reason:"Illegal (mutually perilous): max-size resolving outcomes conflict." };
+      }
+
+      const [winner] = Array.from(winnersAtMax);
+      if (winner !== color) {
+        return { ok:false, reason:"Illegal (perilous): max-size resolving outcome favors opponent." };
+      }
+
+      return { ok:true, reason:"" };
+    }
+
+    function isLegalMoveKeyForColor(k, color) {
+      if (!coordSet.has(k)) return false;
+      if (stones.has(k)) return false;
+
+      if (stones.size === 0 && color === "W" && !isCornerKey(k)) return false;
+
+      const {q,r} = parseKey(k);
+      if (wouldCreateTriangleAt(stones, q, r)) return false;
+
+      const peril = passesPerilousPlacementRule(k, color);
+      if (!peril.ok) return false;
+
+      return true;
+    }
+
+    function computeLegalMovesFor(color) {
+      const moves = [];
+      for (const {q,r} of coords) {
+        const k = keyOf(q,r);
+        if (isLegalMoveKeyForColor(k, color)) moves.push(k);
+      }
+      return moves;
+    }
+
+    function computeLegalMoves() { legalMoves = computeLegalMovesFor(turn); }
+
+    // No-pass rule: if current player has no legal moves, game is over.
+    function ensureTerminalOrComputeMoves() {
+      computeLegalMoves();
+      if (legalMoves.length === 0) {
+        setMsg(`${turn==="W"?"White":"Black"} has no legal moves: game over.`, "warn");
+      }
+    }
+
+    function recomputeAndRender(closerColor=null) {
+      computeTerritoryAndPreview();
+      resolveDeadRegionsCascadeMain(closerColor);
+      computeTerritoryAndPreview();
+
+      ensureTerminalOrComputeMoves();
+      renderBoard();
+    }
+
+    function onHexClickKey(k) {
+      if (!canHumanInteract()) return;
+      if (!coordSet.has(k) || stones.has(k)) return;
+      if (terminalNoMovesCurrent()) return;
+
+      if (!isLegalMoveKeyForColor(k, turn)) {
+        if (stones.size === 0 && turn === "W" && !isCornerKey(k)) {
+          setMsg("Illegal: White’s first move must be in a corner cell.", "bad");
+          return;
+        }
+        const {q,r} = parseKey(k);
+        if (wouldCreateTriangleAt(stones, q, r)) {
+          setMsg("Illegal: would create a minimal 3-hex triangle.", "bad");
+          return;
+        }
+        const peril = passesPerilousPlacementRule(k, turn);
+        if (!peril.ok) {
+          setMsg(peril.reason, "bad");
+          return;
+        }
+        setMsg("Illegal move.", "bad");
+        return;
+      }
+
+      history.push(snapshot());
+
+      const placedColor = turn;
+      stones.set(k, placedColor);
+      turn = (turn==="W") ? "B" : "W";
+
+      setMsg("");
+      recomputeAndRender(placedColor);
+      scheduleAIIfNeeded();
+    }
+
+    function undo() {
+      clearTimeout(aiTimer);
+      const snap = history.pop();
+      if (!snap) return;
+      restore(snap);
+      setMsg("");
+      recomputeAndRender();
+      scheduleAIIfNeeded();
+    }
+
+    function clearAll() {
+      clearTimeout(aiTimer);
+      history = [];
+      stones.clear();
+      turn = "W";
+      regionDeadState = new Map();
+      lastEvents = [];
+      setMsg("");
+      testBoxEl.textContent = "";
+      recomputeAndRender();
+      scheduleAIIfNeeded();
+    }
+
+    function applyMoveCore(moveKey, { recordHistory=false, render=true } = {}) {
+      if (!isLegalMoveKeyForColor(moveKey, turn)) return false;
+      if (recordHistory) history.push(snapshot());
+      const placedColor = turn;
+      stones.set(moveKey, placedColor);
+      turn = (turn==="W") ? "B" : "W";
+      if (!suppressMessages) setMsg("");
+
+      if (render) {
+        recomputeAndRender(placedColor);
+      } else {
+        computeTerritoryAndPreview();
+        resolveDeadRegionsCascadeMain(placedColor);
+        computeTerritoryAndPreview();
+        ensureTerminalOrComputeMoves();
+      }
+      return true;
+    }
+
+    function terminalOutcomeNow() {
+      if (!terminalNoMovesCurrent()) return null;
+      const fs = computeFinalScore();
+      let winner = "D";
+      if (fs.W > fs.B) winner = "W";
+      else if (fs.B > fs.W) winner = "B";
+      return { winner, score: fs };
+    }
+
+    function runRandomSimulationFromCurrent({ maxSteps=20000 } = {}) {
+      const saved = fullSnapshot();
+      const savedSuppress = suppressMessages;
+      suppressMessages = true;
+      let cycle = false;
+      let steps = 0;
+      const seen = new Set();
+
+      try {
+        while (steps < maxSteps) {
+          const h = positionHash();
+          if (seen.has(h)) { cycle = true; break; }
+          seen.add(h);
+
+          computeTerritoryAndPreview();
+          resolveDeadRegionsCascadeMain();
+          computeTerritoryAndPreview();
+          const moves = computeLegalMovesFor(turn);
+          legalMoves = moves;
+          if (moves.length === 0) break;
+
+          const move = moves[Math.floor(Math.random() * moves.length)];
+          if (!applyMoveCore(move, { render:false })) break;
+          steps++;
+        }
+
+        const outcome = cycle ? null : terminalOutcomeNow();
+        return {
+          cycle,
+          steps,
+          winner: outcome ? outcome.winner : "CYCLE",
+          score: outcome ? outcome.score : null,
+        };
+      } finally {
+        suppressMessages = savedSuppress;
+        fullRestore(saved);
+      }
+    }
+
+    function chooseRandomLegalMove() {
+      const moves = computeLegalMovesFor(turn);
+      if (!moves.length) return null;
+      return moves[Math.floor(Math.random() * moves.length)];
+    }
+
+    function chooseMCTSMove() {
+      const rootMoves = computeLegalMovesFor(turn);
+      if (rootMoves.length <= 1) return rootMoves[0] || null;
+
+      const aiColor = turn;
+      const stats = rootMoves.map(m => ({ move:m, visits:0, reward:0 }));
+      const iterations = rootMoves.length < 10 ? 260 : rootMoves.length < 25 ? 180 : 120;
+      const start = performance.now();
+
+      for (let i = 0; i < iterations && performance.now() - start < 450; i++) {
+        let node;
+        if (i < stats.length) {
+          node = stats[i];
+        } else {
+          const total = stats.reduce((s, x) => s + x.visits, 0) || 1;
+          let best = -Infinity;
+          for (const s of stats) {
+            const avg = s.visits ? s.reward / s.visits : 0.5;
+            const uct = s.visits ? avg + 1.25 * Math.sqrt(Math.log(total) / s.visits) : Infinity;
+            if (uct > best) { best = uct; node = s; }
+          }
+        }
+
+        const saved = fullSnapshot();
+        const savedSuppress = suppressMessages;
+        suppressMessages = true;
+        try {
+          applyMoveCore(node.move, { render:false });
+          const sim = runRandomSimulationFromCurrent({ maxSteps: 12000 });
+          let reward = 0.5;
+          if (sim.cycle) reward = 0.5;
+          else if (sim.winner === "D") reward = 0.5;
+          else reward = (sim.winner === aiColor) ? 1 : 0;
+          node.visits += 1;
+          node.reward += reward;
+        } finally {
+          suppressMessages = savedSuppress;
+          fullRestore(saved);
+        }
+      }
+
+      stats.sort((a,b) => (b.visits - a.visits) || ((b.reward/Math.max(1,b.visits)) - (a.reward/Math.max(1,a.visits))));
+      return stats[0].move;
+    }
+
+    function chooseAIMove() {
+      const controller = currentController();
+      if (controller === "human") return null;
+      return controller === "random" ? chooseRandomLegalMove() : chooseMCTSMove();
+    }
+
+    function scheduleAIIfNeeded() {
+      clearTimeout(aiTimer);
+      if (uiBusy || uiAnimating || aiThinking) return;
+      if (terminalNoMovesCurrent()) return;
+      if (currentController() === "human") return;
+      aiTimer = setTimeout(makeAIMove, 180);
+    }
+
+    function makeAIMove() {
+      if (uiBusy || uiAnimating || aiThinking) return;
+      if (terminalNoMovesCurrent()) return;
+      if (currentController() === "human") return;
+      aiThinking = true;
+      updateStatus();
+      setTimeout(() => {
+        try {
+          const move = chooseAIMove();
+          if (move) applyMoveCore(move, { recordHistory:true, render:true });
+        } finally {
+          aiThinking = false;
+          renderBoard();
+          scheduleAIIfNeeded();
+        }
+      }, 80);
+    }
+
+    async function randomPlayout() {
+      if (uiBusy || uiAnimating || aiThinking) return;
+      clearTimeout(aiTimer);
+      history.push(snapshot());
+      uiBusy = true;
+      uiAnimating = true;
+      testBoxEl.textContent = "";
+      setMsg("Random playout running…", "warn");
+      renderBoard();
+
+      const seen = new Set();
+      let safety = 20000;
+      let cycle = false;
+
+      try {
+        while (safety-- > 0) {
+          const h = positionHash();
+          if (seen.has(h)) { cycle = true; break; }
+          seen.add(h);
+
+          computeTerritoryAndPreview();
+          resolveDeadRegionsCascadeMain();
+          computeTerritoryAndPreview();
+
+          const moves = computeLegalMovesFor(turn);
+          legalMoves = moves;
+          if (moves.length === 0) break;
+
+          const move = moves[Math.floor(Math.random() * moves.length)];
+          const ok = applyMoveCore(move, { render:true });
+          if (!ok) break;
+          await sleep(35);
+          if (terminalNoMovesCurrent()) break;
+        }
+      } finally {
+        uiAnimating = false;
+        uiBusy = false;
+        if (cycle) setMsg("Random playout stopped: cycle detected.", "bad");
+        else setMsg("Random playout finished. Final score shown above.", "warn");
+        renderBoard();
+        scheduleAIIfNeeded();
+      }
+    }
+
+    async function runTest100() {
+      if (uiBusy || uiAnimating || aiThinking) return;
+      clearTimeout(aiTimer);
+      uiBusy = true;
+      testBoxEl.textContent = "";
+      renderBoard();
+
+      const lengths = [];
+      let whiteWins = 0, blackWins = 0, draws = 0, cycles = 0;
+      const saved = fullSnapshot();
+      const savedHistory = history.slice();
+      const savedSuppress = suppressMessages;
+
+      try {
+        suppressMessages = true;
+        for (let i = 0; i < 100; i++) {
+          stones = new Map();
+          turn = "W";
+          regionDeadState = new Map();
+          lastEvents = [];
+          legalMoves = [];
+          territoryByCell = new Map();
+          let localSteps = 0;
+          const seen = new Set();
+          let cycle = false;
+          let guard = 20000;
+
+          while (guard-- > 0) {
+            const h = positionHash();
+            if (seen.has(h)) { cycle = true; break; }
+            seen.add(h);
+
+            computeTerritoryAndPreview();
+            resolveDeadRegionsCascadeMain();
+            computeTerritoryAndPreview();
+            const moves = computeLegalMovesFor(turn);
+            legalMoves = moves;
+            if (moves.length === 0) break;
+            const mv = moves[Math.floor(Math.random() * moves.length)];
+            if (!applyMoveCore(mv, { render:false })) break;
+            localSteps++;
+          }
+
+          lengths.push(localSteps);
+          if (cycle) {
+            cycles++;
+          } else {
+            const outcome = terminalOutcomeNow();
+            if (!outcome || outcome.winner === "D") draws++;
+            else if (outcome.winner === "W") whiteWins++;
+            else blackWins++;
+          }
+
+          if ((i + 1) % 10 === 0) {
+            testBoxEl.textContent = `Testing random playouts: ${i + 1}/100 complete...`;
+            await sleep(0);
+          }
+        }
+
+        const sorted = lengths.slice().sort((a,b)=>a-b);
+        const median = sorted.length ? (sorted[49] + sorted[50]) / 2 : 0;
+        const avg = lengths.length ? lengths.reduce((a,b)=>a+b,0)/lengths.length : 0;
+        const total = 100;
+        testBoxEl.innerHTML =
+          `Random test (100 playouts, radius ${boardRadius})<br>` +
+          `Median length: <b>${median}</b> moves (avg ${avg.toFixed(1)})<br>` +
+          `Balance: White ${(whiteWins/total*100).toFixed(1)}% | Black ${(blackWins/total*100).toFixed(1)}% | Draws ${draws} | Cycles ${cycles}`;
+      } finally {
+        suppressMessages = savedSuppress;
+        fullRestore(saved);
+        history = savedHistory;
+        uiBusy = false;
+        recomputeAndRender();
+        scheduleAIIfNeeded();
+      }
+    }
+
+    function newGame() {
+      clearTimeout(aiTimer);
+      uiBusy = false;
+      uiAnimating = false;
+      aiThinking = false;
+      boardRadius = Math.max(1, Math.min(12, parseInt(radiusInput.value, 10) || 5));
+      hexSize = Math.max(14, Math.min(60, parseInt(hexSizeInput.value, 10) || 28));
+      radiusInput.value = boardRadius;
+      hexSizeInput.value = hexSize;
+
+      rebuildBoardCache();
+      clearAll();
+    }
+
+    newBtn.addEventListener("click", newGame);
+    undoBtn.addEventListener("click", undo);
+    clearBtn.addEventListener("click", clearAll);
+    randomBtn.addEventListener("click", randomPlayout);
+    testBtn.addEventListener("click", runTest100);
+    opponentModeEl.addEventListener("change", () => { renderBoard(); scheduleAIIfNeeded(); });
+
+    radiusInput.addEventListener("change", newGame);
+    hexSizeInput.addEventListener("change", newGame);
+
+    rebuildBoardCache();
+    recomputeAndRender();
+    scheduleAIIfNeeded();
+  </script>
+</body>
+</html>
