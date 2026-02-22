@@ -2,68 +2,990 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Abstract Games</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trike</title>
   <style>
+    :root {
+      --wood-1: #d7b176;
+      --wood-2: #b6874e;
+      --wood-3: #91622f;
+      --line: #6e4c24;
+      --panel: #f4ead7;
+      --accent: #7a2f1a;
+      --legal: rgba(178, 36, 36, 0.28);
+      --legal-stroke: rgba(110, 110, 110, 0.9);
+      --text: #1d140b;
+    }
+    * { box-sizing: border-box; }
     body {
-      font-family: Arial, Helvetica, sans-serif;
-      background: #f8f9fa;
-      color: #333;
       margin: 0;
-      padding: 40px 20px;
-      line-height: 1.6;
+      font-family: Helvetica, Arial, sans-serif;
+      color: var(--text);
+      background: #ffffff;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 16px;
     }
-    .container {
-      max-width: 600px;
-      margin: 0 auto;
-      text-align: center;
+    .app {
+      width: min(1200px, 100%);
+      display: grid;
+      grid-template-columns: 330px minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
     }
-    h1 {
-      color: #2c3e50;
-      margin-bottom: 40px;
+    .panel {
+      background: linear-gradient(180deg, rgba(255,255,255,0.72), rgba(255,255,255,0.58));
+      border: 1px solid rgba(110, 76, 36, 0.2);
+      border-radius: 14px;
+      padding: 14px;
+      backdrop-filter: blur(4px);
+      box-shadow: 0 8px 24px rgba(70, 43, 16, 0.12);
     }
-    .game-list {
-      list-style: none;
-      padding: 0;
+    .panel h1 {
+      margin: 0 0 8px;
+      font-size: 1.6rem;
+      letter-spacing: 0.02em;
     }
-    .game-list li {
-      margin: 20px 0;
+    .subtle {
+      color: #4d3a23;
+      font-size: 0.92rem;
+      margin-bottom: 10px;
     }
-    .game-link {
-      display: inline-block;
-      font-size: 1.4em;
-      padding: 14px 28px;
-      background: #3498db;
-      color: white;
-      text-decoration: none;
-      border-radius: 8px;
-      transition: background 0.2s;
+    .controls {
+      display: grid;
+      gap: 10px;
     }
-    .game-link:hover {
-      background: #2980b9;
+    .row {
+      display: grid;
+      gap: 6px;
     }
-    .game-link:active {
-      transform: translateY(2px);
+    .row label {
+      font-size: 0.85rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
     }
-    footer {
-      margin-top: 60px;
-      font-size: 0.9em;
-      color: #777;
+    select, button {
+      width: 100%;
+      border-radius: 9px;
+      border: 1px solid rgba(74, 49, 20, 0.25);
+      padding: 8px 10px;
+      font: inherit;
+      background: #fff9ef;
+      color: inherit;
+    }
+    button {
+      cursor: pointer;
+      background: linear-gradient(180deg, #fff7e7, #f1dec0);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+      transition: transform 0.05s ease;
+    }
+    button:hover:not(:disabled) { transform: translateY(-1px); }
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+    .button-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .status-grid {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+      font-size: 0.92rem;
+      line-height: 1.3;
+    }
+    .status-box {
+      background: rgba(255,255,255,0.5);
+      border: 1px solid rgba(74,49,20,0.12);
+      border-radius: 10px;
+      padding: 8px 10px;
+    }
+    .status-box strong { color: #2c1d0d; }
+    .board-wrap {
+      background: #f5f1e8;
+      border: 2px solid rgba(89, 54, 20, 0.5);
+      border-radius: 18px;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.5), 0 12px 32px rgba(70,43,16,0.08);
+      padding: 10px;
+      min-height: 600px;
+    }
+    #boardSvg {
+      width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 12px;
+      background: #fbf1de;
+    }
+    .small {
+      font-size: 0.82rem;
+      color: #513a20;
+    }
+    @media (max-width: 960px) {
+      .app { grid-template-columns: 1fr; }
+      .board-wrap { min-height: 420px; }
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>Abstract Games</h1>
-    <ul class="game-list">
-          <li><a href="bounders/index.html" class="game-link">Bounders</a></li>
-          <li><a href="bowline/index.html" class="game-link">Bowline</a></li>
-          <li><a href="freezers/index.html" class="game-link">Freezers</a></li>
-          <li><a href="myramid/index.html" class="game-link">Myramid</a></li>
-          <li><a href="outbound/index.html" class="game-link">Outbound</a></li>
-          <li><a href="replica/index.html" class="game-link">Replica</a></li>
-          <li><a href="zonewreck/index.html" class="game-link">Zonewreck</a></li>
-        </ul>
+  <div class="app">
+    <div class="panel">
+      <h1>Trike</h1>
+      <div class="controls">
+        <div class="row">
+          <label for="opponentSelect">Opponent</label>
+          <select id="opponentSelect">
+            <option value="pvp">Person vs Person</option>
+            <option value="random">Person vs Random</option>
+            <option value="mcts">Person vs MCTS</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label for="sizeSelect">Board Size (side length)</label>
+          <select id="sizeSelect"></select>
+        </div>
+
+        <div class="row">
+          <label for="openingColorSelect">Opening Color (P1 first placement)</label>
+          <select id="openingColorSelect">
+            <option value="B">Black</option>
+            <option value="W">White</option>
+          </select>
+        </div>
+
+        <div class="button-row">
+          <button id="restartBtn">Clear / Restart</button>
+          <button id="swapBtn">Swap (Pie Rule)</button>
+        </div>
+
+        <div class="button-row">
+          <button id="playoutBtn">Random Playout</button>
+          <button id="testBtn">Test x100</button>
+        </div>
+      </div>
+
+      <div class="status-grid">
+        <div class="status-box" id="onMoveBox"></div>
+        <div class="status-box" id="lastMoveBox"></div>
+        <div class="status-box" id="scoreBox"></div>
+        <div class="status-box small" id="testBox"></div>
+      </div>
+    </div>
+
+    <div class="board-wrap">
+      <svg id="boardSvg" viewBox="0 0 900 760" aria-label="Trike board"></svg>
+    </div>
   </div>
+
+  <script>
+    (() => {
+      const svg = document.getElementById('boardSvg');
+      const opponentSelect = document.getElementById('opponentSelect');
+      const sizeSelect = document.getElementById('sizeSelect');
+      const openingColorSelect = document.getElementById('openingColorSelect');
+      const restartBtn = document.getElementById('restartBtn');
+      const swapBtn = document.getElementById('swapBtn');
+      const playoutBtn = document.getElementById('playoutBtn');
+      const testBtn = document.getElementById('testBtn');
+      const onMoveBox = document.getElementById('onMoveBox');
+      const lastMoveBox = document.getElementById('lastMoveBox');
+      const scoreBox = document.getElementById('scoreBox');
+      const testBox = document.getElementById('testBox');
+
+      const DIRS = [
+        [1, 0], [0, 1], [-1, 1],
+        [-1, 0], [0, -1], [1, -1]
+      ];
+
+      const state = {
+        game: null,
+        ui: {
+          busy: false,
+          animating: false,
+          aiTimer: null,
+          aiThinking: false,
+          legalSet: new Set(),
+        }
+      };
+
+      for (let n = 7; n <= 19; n++) {
+        const opt = document.createElement('option');
+        opt.value = String(n);
+        opt.textContent = String(n);
+        if (n === 13) opt.selected = true;
+        sizeSelect.appendChild(opt);
+      }
+
+      function keyOf(q, r) { return `${q},${r}`; }
+      function parseKey(k) {
+        const [q, r] = k.split(',').map(Number);
+        return { q, r };
+      }
+      function inBounds(size, q, r) {
+        return q >= 0 && r >= 0 && q + r < size;
+      }
+      function coordLabelFromQR(q, r) {
+        const row = q + r;
+        const col = q + 1;
+        return `${String.fromCharCode(97 + row)}${col}`;
+      }
+      function playerName(idx) { return `P${idx + 1}`; }
+      function colorName(c) { return c === 'B' ? 'Black' : 'White'; }
+      function otherColor(c) { return c === 'B' ? 'W' : 'B'; }
+      function otherPlayer(p) { return p === 0 ? 1 : 0; }
+      function randInt(n) { return Math.floor(Math.random() * n); }
+      function pickRandom(arr) { return arr[randInt(arr.length)]; }
+
+      function createInitialGame(size) {
+        return {
+          size,
+          board: new Map(), // key -> 'B' | 'W'
+          pawn: null,
+          currentPlayer: 0,
+          phase: 'opening', // opening | pie_decision | play | gameover
+          playerColors: [null, null],
+          moveHistory: [],
+          swapTaken: false,
+          result: null,
+          pliesPlaced: 0,
+        };
+      }
+
+      function cloneGame(g) {
+        return {
+          size: g.size,
+          board: new Map(g.board),
+          pawn: g.pawn ? { q: g.pawn.q, r: g.pawn.r } : null,
+          currentPlayer: g.currentPlayer,
+          phase: g.phase,
+          playerColors: [...g.playerColors],
+          moveHistory: g.moveHistory.map(m => ({ ...m })),
+          swapTaken: g.swapTaken,
+          result: g.result ? JSON.parse(JSON.stringify(g.result)) : null,
+          pliesPlaced: g.pliesPlaced,
+        };
+      }
+
+      function legalMovesFrom(g, q, r) {
+        const out = [];
+        for (const [dq, dr] of DIRS) {
+          let cq = q + dq;
+          let cr = r + dr;
+          while (inBounds(g.size, cq, cr) && !g.board.has(keyOf(cq, cr))) {
+            out.push({ q: cq, r: cr, kind: 'move' });
+            cq += dq;
+            cr += dr;
+          }
+        }
+        return out;
+      }
+
+      function getLegalActions(g) {
+        if (g.phase === 'gameover') return [];
+        if (g.phase === 'opening') {
+          const acts = [];
+          for (let r = 0; r < g.size; r++) {
+            for (let q = 0; q + r < g.size; q++) {
+              acts.push({ kind: 'open', q, r, color: 'B' });
+              acts.push({ kind: 'open', q, r, color: 'W' });
+            }
+          }
+          return acts;
+        }
+        if (!g.pawn) return [];
+        const moves = legalMovesFrom(g, g.pawn.q, g.pawn.r).map(m => ({ kind: 'move', q: m.q, r: m.r }));
+        if (g.phase === 'pie_decision') {
+          return [{ kind: 'swap' }, ...moves];
+        }
+        return moves;
+      }
+
+      function getLegalDestinations(g) {
+        if (g.phase === 'opening') {
+          const dests = [];
+          for (let r = 0; r < g.size; r++) {
+            for (let q = 0; q + r < g.size; q++) dests.push({ q, r, kind: 'open' });
+          }
+          return dests;
+        }
+        if (!g.pawn) return [];
+        return legalMovesFrom(g, g.pawn.q, g.pawn.r);
+      }
+
+      function recordMove(g, entry) {
+        g.moveHistory.push({ ...entry, ply: g.moveHistory.length + 1 });
+      }
+
+      function computeScore(g) {
+        if (!g.pawn) return null;
+        const pawnKey = keyOf(g.pawn.q, g.pawn.r);
+        const beneath = g.board.get(pawnKey);
+        const byColor = { B: 0, W: 0 };
+        if (beneath) byColor[beneath] += 1;
+        for (const [dq, dr] of DIRS) {
+          const q = g.pawn.q + dq;
+          const r = g.pawn.r + dr;
+          const c = g.board.get(keyOf(q, r));
+          if (c) byColor[c] += 1;
+        }
+        const p1 = byColor[g.playerColors[0]] || 0;
+        const p2 = byColor[g.playerColors[1]] || 0;
+        return { byColor, byPlayer: [p1, p2] };
+      }
+
+      function finalizeIfTrapped(g) {
+        if (!g.pawn) return false;
+        const nextMoves = legalMovesFrom(g, g.pawn.q, g.pawn.r);
+        if (nextMoves.length > 0) return false;
+        g.phase = 'gameover';
+        const score = computeScore(g);
+        const [s1, s2] = score.byPlayer;
+        let winner = null;
+        if (s1 > s2) winner = 0;
+        else if (s2 > s1) winner = 1;
+        g.result = {
+          score,
+          winner,
+          draw: winner === null,
+          finalCoord: coordLabelFromQR(g.pawn.q, g.pawn.r),
+          pliesPlaced: g.pliesPlaced,
+        };
+        return true;
+      }
+
+      function applyAction(g, action) {
+        if (g.phase === 'gameover') return false;
+        if (!action) return false;
+
+        if (action.kind === 'swap') {
+          if (g.phase !== 'pie_decision' || g.currentPlayer !== 1) return false;
+          [g.playerColors[0], g.playerColors[1]] = [g.playerColors[1], g.playerColors[0]];
+          g.swapTaken = true;
+          recordMove(g, {
+            kind: 'swap',
+            player: 1,
+            note: 'Pie-rule swap',
+          });
+          g.phase = 'play';
+          g.currentPlayer = 0;
+          return true;
+        }
+
+        if (action.kind === 'open') {
+          if (g.phase !== 'opening' || g.currentPlayer !== 0) return false;
+          if (!inBounds(g.size, action.q, action.r)) return false;
+          const k = keyOf(action.q, action.r);
+          if (g.board.has(k)) return false;
+          g.playerColors[0] = action.color;
+          g.playerColors[1] = otherColor(action.color);
+          g.board.set(k, action.color);
+          g.pawn = { q: action.q, r: action.r };
+          g.pliesPlaced += 1;
+          recordMove(g, {
+            kind: 'open',
+            player: 0,
+            color: action.color,
+            q: action.q,
+            r: action.r,
+            coord: coordLabelFromQR(action.q, action.r),
+          });
+          g.phase = 'pie_decision';
+          g.currentPlayer = 1;
+          return true;
+        }
+
+        if (action.kind === 'move') {
+          if (!g.pawn) return false;
+          if (!(g.phase === 'pie_decision' || g.phase === 'play')) return false;
+          const legal = legalMovesFrom(g, g.pawn.q, g.pawn.r).some(m => m.q === action.q && m.r === action.r);
+          if (!legal) return false;
+          const color = g.playerColors[g.currentPlayer];
+          const k = keyOf(action.q, action.r);
+          if (g.board.has(k)) return false;
+          g.board.set(k, color);
+          g.pawn = { q: action.q, r: action.r };
+          g.pliesPlaced += 1;
+          recordMove(g, {
+            kind: 'move',
+            player: g.currentPlayer,
+            color,
+            q: action.q,
+            r: action.r,
+            coord: coordLabelFromQR(action.q, action.r),
+          });
+          g.phase = 'play';
+          g.currentPlayer = otherPlayer(g.currentPlayer);
+          finalizeIfTrapped(g);
+          return true;
+        }
+
+        return false;
+      }
+
+      function getLastPlacedMove(g) {
+        for (let i = g.moveHistory.length - 1; i >= 0; i--) {
+          const m = g.moveHistory[i];
+          if (m.kind === 'open' || m.kind === 'move') return m;
+        }
+        return null;
+      }
+
+      function getControllerForPlayer(playerIdx) {
+        if (playerIdx === 0) return 'human';
+        const mode = opponentSelect.value;
+        if (mode === 'pvp') return 'human';
+        if (mode === 'random') return 'random';
+        return 'mcts';
+      }
+
+      function randomAction(g) {
+        const acts = getLegalActions(g);
+        if (!acts.length) return null;
+        if (g.phase === 'pie_decision') {
+          // Mildly sensible random pie behavior: 50% swap, else random move.
+          if (Math.random() < 0.5) return { kind: 'swap' };
+          const moves = acts.filter(a => a.kind === 'move');
+          return moves.length ? pickRandom(moves) : { kind: 'swap' };
+        }
+        if (g.phase === 'opening') {
+          // Pick random location and random color.
+          const empties = acts.filter(a => a.kind === 'open');
+          return pickRandom(empties);
+        }
+        return pickRandom(acts);
+      }
+
+      function randomPlayoutResult(g, perspectivePlayer = null) {
+        const sim = cloneGame(g);
+        let guard = sim.size * sim.size * 4 + 500;
+        while (sim.phase !== 'gameover' && guard-- > 0) {
+          const act = randomAction(sim);
+          if (!act || !applyAction(sim, act)) break;
+          if (sim.phase !== 'gameover' && sim.phase === 'play' && !sim.pawn) break;
+          if (sim.phase !== 'gameover' && sim.phase === 'play') finalizeIfTrapped(sim);
+        }
+        if (sim.phase !== 'gameover') {
+          // Safety fallback, should rarely happen.
+          finalizeIfTrapped(sim);
+        }
+        if (perspectivePlayer == null) return sim;
+        if (!sim.result) return 0.5;
+        if (sim.result.draw) return 0.5;
+        return sim.result.winner === perspectivePlayer ? 1 : 0;
+      }
+
+      function mctsChooseAction(g, aiPlayer, opts = {}) {
+        const iterations = opts.iterations ?? (g.size <= 10 ? 500 : g.size <= 13 ? 320 : 220);
+        const timeLimitMs = opts.timeLimitMs ?? 450;
+        const rootLegal = getLegalActions(g);
+        if (!rootLegal.length) return null;
+        if (rootLegal.length === 1) return rootLegal[0];
+
+        // Root-level UCT bandit over actions (sufficient for move choice in this UI).
+        const stats = rootLegal.map(action => ({ action, visits: 0, reward: 0 }));
+        const start = performance.now();
+        let i = 0;
+        while (i < iterations && performance.now() - start < timeLimitMs) {
+          let choice = null;
+          if (i < stats.length) {
+            choice = stats[i];
+          } else {
+            const totalVisits = stats.reduce((s, x) => s + x.visits, 0) || 1;
+            let bestScore = -Infinity;
+            for (const s of stats) {
+              const avg = s.visits ? s.reward / s.visits : 0.5;
+              const ucb = avg + 1.25 * Math.sqrt(Math.log(totalVisits) / s.visits);
+              if (ucb > bestScore) {
+                bestScore = ucb;
+                choice = s;
+              }
+            }
+          }
+          const sim = cloneGame(g);
+          applyAction(sim, choice.action);
+          if (sim.phase !== 'gameover') finalizeIfTrapped(sim);
+          const reward = sim.phase === 'gameover'
+            ? (sim.result.draw ? 0.5 : (sim.result.winner === aiPlayer ? 1 : 0))
+            : randomPlayoutResult(sim, aiPlayer);
+          choice.visits += 1;
+          choice.reward += reward;
+          i++;
+        }
+
+        stats.sort((a, b) => {
+          if (b.visits !== a.visits) return b.visits - a.visits;
+          return (b.reward / Math.max(1, b.visits)) - (a.reward / Math.max(1, a.visits));
+        });
+
+        // Prefer best average among adequately sampled actions.
+        let best = stats[0];
+        let bestAvg = -1;
+        for (const s of stats) {
+          const avg = s.reward / Math.max(1, s.visits);
+          const minVisits = Math.max(1, Math.floor(stats[0].visits * 0.35));
+          if (s.visits >= minVisits && avg > bestAvg) {
+            bestAvg = avg;
+            best = s;
+          }
+        }
+        return best.action;
+      }
+
+      function makeAIMove() {
+        if (state.ui.busy || state.ui.animating || state.ui.aiThinking) return;
+        const g = state.game;
+        if (!g || g.phase === 'gameover') return;
+        const controller = getControllerForPlayer(g.currentPlayer);
+        if (controller === 'human') return;
+
+        state.ui.aiThinking = true;
+        render();
+        setTimeout(() => {
+          try {
+            let action = null;
+            if (controller === 'random') {
+              action = randomAction(g);
+            } else {
+              action = mctsChooseAction(g, g.currentPlayer);
+            }
+            if (action) {
+              applyAction(g, action);
+              render();
+              scheduleAIIfNeeded();
+            }
+          } finally {
+            state.ui.aiThinking = false;
+            render();
+          }
+        }, 120);
+      }
+
+      function scheduleAIIfNeeded() {
+        clearTimeout(state.ui.aiTimer);
+        const g = state.game;
+        if (!g || g.phase === 'gameover' || state.ui.busy || state.ui.animating) return;
+        if (getControllerForPlayer(g.currentPlayer) === 'human') return;
+        state.ui.aiTimer = setTimeout(makeAIMove, 200);
+      }
+
+      function resetGame() {
+        clearTimeout(state.ui.aiTimer);
+        state.ui.busy = false;
+        state.ui.animating = false;
+        state.ui.aiThinking = false;
+        testBox.textContent = '';
+        const size = Number(sizeSelect.value);
+        state.game = createInitialGame(size);
+        render();
+        scheduleAIIfNeeded();
+      }
+
+      function legalDestinationSetForUI(g) {
+        const set = new Set();
+        if (!g || g.phase === 'gameover') return set;
+        const controller = getControllerForPlayer(g.currentPlayer);
+        if (controller !== 'human' || state.ui.busy || state.ui.animating) return set;
+        const dests = getLegalDestinations(g);
+        for (const d of dests) set.add(keyOf(d.q, d.r));
+        return set;
+      }
+
+      function getLayout(size) {
+        const maxR = size >= 16 ? 18 : size >= 13 ? 22 : size >= 10 ? 28 : 36;
+        const hexW = Math.sqrt(3) * maxR;
+        const minX = -(size - 1) * hexW / 2 - maxR - 16;
+        const maxX = +(size - 1) * hexW / 2 + maxR + 16;
+        const minY = -maxR - 16;
+        const maxY = (size - 1) * 1.5 * maxR + maxR + 20;
+        const width = maxX - minX;
+        const height = maxY - minY;
+        const scaleX = 860 / width;
+        const scaleY = 720 / height;
+        const scale = Math.min(scaleX, scaleY);
+        const tx = 450 - ((minX + maxX) / 2) * scale;
+        const ty = 380 - ((minY + maxY) / 2) * scale;
+        return { R: maxR, hexW, scale, tx, ty };
+      }
+
+      function centerFor(q, r, layout) {
+        const row = q + r;
+        const cx = (q - row / 2) * layout.hexW;
+        const cy = row * 1.5 * layout.R;
+        return { x: cx * layout.scale + layout.tx, y: cy * layout.scale + layout.ty };
+      }
+
+      function hexPoints(cx, cy, R) {
+        const pts = [];
+        for (let i = 0; i < 6; i++) {
+          const ang = Math.PI / 180 * (60 * i - 30);
+          pts.push(`${(cx + R * Math.cos(ang)).toFixed(2)},${(cy + R * Math.sin(ang)).toFixed(2)}`);
+        }
+        return pts.join(' ');
+      }
+
+      function svgEl(name, attrs = {}) {
+        const el = document.createElementNS('http://www.w3.org/2000/svg', name);
+        for (const [k, v] of Object.entries(attrs)) {
+          if (v != null) el.setAttribute(k, String(v));
+        }
+        return el;
+      }
+
+      function render() {
+        const g = state.game;
+        if (!g) return;
+        state.ui.legalSet = legalDestinationSetForUI(g);
+        renderStatus();
+        renderBoard();
+        updateButtons();
+      }
+
+      function renderStatus() {
+        const g = state.game;
+        if (!g) return;
+
+        const onMoveText = (() => {
+          if (g.phase === 'gameover') {
+            const r = g.result;
+            const outcome = r.draw ? 'Draw' : `${playerName(r.winner)} wins`;
+            return `<strong>Game Over</strong><br>${outcome} (${r.score.byPlayer[0]}-${r.score.byPlayer[1]}) at ${r.finalCoord}`;
+          }
+          const p = g.currentPlayer;
+          const color = g.playerColors[p] ? `${colorName(g.playerColors[p])}` : 'Unassigned';
+          if (g.phase === 'opening') {
+            return `<strong>On move:</strong> P1 opening placement<br>Choose any hex and opening color.`;
+          }
+          if (g.phase === 'pie_decision') {
+            return `<strong>On move:</strong> ${playerName(p)} (${color})<br>Pie rule: may <em>Swap</em> or make a regular move.`;
+          }
+          const aiTag = getControllerForPlayer(p) === 'human' ? '' : ' (AI)';
+          return `<strong>On move:</strong> ${playerName(p)} (${color})${aiTag}`;
+        })();
+        onMoveBox.innerHTML = onMoveText + (state.ui.aiThinking ? '<br><span class="small">AI thinking...</span>' : '');
+
+        const lastPlaced = getLastPlacedMove(g);
+        const lastSwap = [...g.moveHistory].reverse().find(m => m.kind === 'swap');
+        if (!lastPlaced) {
+          lastMoveBox.innerHTML = '<strong>Last placed move:</strong> none yet';
+        } else {
+          lastMoveBox.innerHTML = `<strong>Last placed move:</strong> ${lastPlaced.coord} by ${playerName(lastPlaced.player)} (${colorName(lastPlaced.color)})` +
+            (lastSwap ? `<br><span class="small">Latest swap: ${playerName(lastSwap.player)} used pie-rule swap.</span>` : '');
+        }
+
+        if (g.phase === 'gameover' && g.result) {
+          const [s1, s2] = g.result.score.byPlayer;
+          scoreBox.innerHTML = `<strong>Final score:</strong> P1 ${s1} vs P2 ${s2}<br>` +
+            `<span class="small">P1=${colorName(g.playerColors[0])}, P2=${colorName(g.playerColors[1])}; ${g.result.pliesPlaced} stones placed.</span>`;
+        } else if (g.pawn) {
+          const preview = computeScore(g);
+          scoreBox.innerHTML = `<strong>Current pawn:</strong> ${coordLabelFromQR(g.pawn.q, g.pawn.r)}<br>` +
+            `<span class="small">If trapped now: P1 ${preview.byPlayer[0]}, P2 ${preview.byPlayer[1]}.</span>`;
+        } else {
+          scoreBox.innerHTML = `<strong>Current pawn:</strong> not placed yet`;
+        }
+      }
+
+      function updateButtons() {
+        const g = state.game;
+        const busy = state.ui.busy || state.ui.animating || state.ui.aiThinking;
+        swapBtn.disabled = busy || !(g && g.phase === 'pie_decision' && g.currentPlayer === 1 && getControllerForPlayer(1) === 'human');
+        playoutBtn.disabled = busy || !g || g.phase === 'gameover';
+        testBtn.disabled = busy;
+        restartBtn.disabled = state.ui.animating;
+        sizeSelect.disabled = busy;
+        opponentSelect.disabled = busy;
+        openingColorSelect.disabled = !(g && g.phase === 'opening') || busy;
+      }
+
+      function renderBoard() {
+        const g = state.game;
+        const layout = getLayout(g.size);
+        const R = layout.R * layout.scale;
+        svg.replaceChildren();
+
+        const defs = svgEl('defs');
+        const woodGlow = svgEl('radialGradient', { id: 'cellGlow', cx: '35%', cy: '25%', r: '75%' });
+        woodGlow.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#f2d7a7', 'stop-opacity': '0.55' }));
+        woodGlow.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#b27b3e', 'stop-opacity': '0' }));
+        defs.appendChild(woodGlow);
+
+        const blackGrad = svgEl('radialGradient', { id: 'blackStone', cx: '35%', cy: '30%', r: '70%' });
+        blackGrad.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#5a5a5a' }));
+        blackGrad.appendChild(svgEl('stop', { offset: '55%', 'stop-color': '#222' }));
+        blackGrad.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#050505' }));
+        defs.appendChild(blackGrad);
+
+        const whiteGrad = svgEl('radialGradient', { id: 'whiteStone', cx: '35%', cy: '28%', r: '72%' });
+        whiteGrad.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#ffffff' }));
+        whiteGrad.appendChild(svgEl('stop', { offset: '68%', 'stop-color': '#ebebeb' }));
+        whiteGrad.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#cfcfcf' }));
+        defs.appendChild(whiteGrad);
+        svg.appendChild(defs);
+
+        const lastPlaced = getLastPlacedMove(g);
+
+        for (let row = 0; row < g.size; row++) {
+          for (let q = 0; q <= row; q++) {
+            const r = row - q;
+            const k = keyOf(q, r);
+            const { x, y } = centerFor(q, r, layout);
+            const group = svgEl('g', { 'data-key': k });
+            const occupiedColor = g.board.get(k);
+            const isLegal = state.ui.legalSet.has(k);
+            const isPawn = g.pawn && g.pawn.q === q && g.pawn.r === r;
+            const isLastPlaced = lastPlaced && lastPlaced.q === q && lastPlaced.r === r;
+
+            const hex = svgEl('polygon', {
+              points: hexPoints(x, y, R * 0.98),
+              fill: occupiedColor ? (occupiedColor === 'B' ? '#c59153' : '#dba968') : '#d39d5f',
+              stroke: isLegal ? 'var(--legal-stroke)' : 'rgba(85,52,21,0.55)',
+              'stroke-width': isLegal ? 2.2 : 1.25,
+              opacity: occupiedColor ? 0.9 : 1,
+              cursor: isLegal ? 'pointer' : 'default',
+            });
+            group.appendChild(hex);
+            group.appendChild(svgEl('polygon', {
+              points: hexPoints(x, y, R * 0.98),
+              fill: 'url(#cellGlow)',
+              stroke: 'none',
+              opacity: 0.4,
+              'pointer-events': 'none',
+            }));
+
+            if (isLegal) {
+              group.appendChild(svgEl('polygon', {
+                points: hexPoints(x, y, R * 0.9),
+                fill: 'var(--legal)',
+                stroke: 'none',
+                'pointer-events': 'none',
+              }));
+            }
+
+            if (occupiedColor) {
+              group.appendChild(svgEl('circle', {
+                cx: x,
+                cy: y,
+                r: R * 0.84,
+                fill: occupiedColor === 'B' ? 'url(#blackStone)' : 'url(#whiteStone)',
+                stroke: occupiedColor === 'B' ? 'rgba(0,0,0,0.85)' : 'rgba(110,110,110,0.8)',
+                'stroke-width': 1.25,
+              }));
+              group.appendChild(svgEl('ellipse', {
+                cx: x - R * 0.2,
+                cy: y - R * 0.28,
+                rx: R * 0.34,
+                ry: R * 0.18,
+                fill: occupiedColor === 'B' ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.65)',
+                opacity: 0.75,
+                transform: `rotate(-18 ${x} ${y})`,
+                'pointer-events': 'none',
+              }));
+            }
+
+            if (isLastPlaced && !isPawn) {
+              group.appendChild(svgEl('circle', {
+                cx: x,
+                cy: y,
+                r: R * 0.12,
+                fill: 'rgba(122,47,26,0.75)',
+                stroke: 'rgba(255,255,255,0.65)',
+                'stroke-width': 0.8,
+                'pointer-events': 'none',
+              }));
+            }
+
+            if (isPawn) {
+              const pawnG = svgEl('g', { 'pointer-events': 'none' });
+              const py = y - R * 0.03;
+              pawnG.appendChild(svgEl('path', {
+                d: [
+                  `M ${x} ${py - R * 0.44}`,
+                  `C ${x - R * 0.15} ${py - R * 0.44}, ${x - R * 0.2} ${py - R * 0.17}, ${x} ${py - R * 0.12}`,
+                  `C ${x + R * 0.2} ${py - R * 0.17}, ${x + R * 0.15} ${py - R * 0.44}, ${x} ${py - R * 0.44}`,
+                  `Z`,
+                  `M ${x - R * 0.09} ${py - R * 0.12}`,
+                  `L ${x + R * 0.09} ${py - R * 0.12}`,
+                  `L ${x + R * 0.09} ${py - R * 0.02}`,
+                  `Q ${x + R * 0.24} ${py + R * 0.03}, ${x + R * 0.25} ${py + R * 0.2}`,
+                  `L ${x + R * 0.2} ${py + R * 0.39}`,
+                  `L ${x - R * 0.2} ${py + R * 0.39}`,
+                  `L ${x - R * 0.25} ${py + R * 0.2}`,
+                  `Q ${x - R * 0.24} ${py + R * 0.03}, ${x - R * 0.09} ${py - R * 0.02}`,
+                  `Z`
+                ].join(' '),
+                fill: '#c64324',
+                stroke: 'rgba(255,240,220,0.95)',
+                'stroke-width': 0.9,
+              }));
+              pawnG.appendChild(svgEl('rect', {
+                x: x - R * 0.2,
+                y: py + R * 0.38,
+                width: R * 0.4,
+                height: R * 0.06,
+                rx: R * 0.02,
+                fill: '#7a2f1a',
+                opacity: 0.95,
+              }));
+              group.appendChild(pawnG);
+            }
+
+            if (isLegal) {
+              group.addEventListener('click', () => onCellClick(q, r));
+            }
+            svg.appendChild(group);
+          }
+        }
+
+        for (let row = 0; row < g.size; row++) {
+          const leftCell = centerFor(0, row, layout);
+          const t = svgEl('text', {
+            x: leftCell.x - R * 1.15,
+            y: leftCell.y + R * 0.12,
+            'text-anchor': 'middle',
+            'font-size': Math.max(12, R * 0.58),
+            'font-family': 'Helvetica, Arial, sans-serif',
+            fill: 'rgba(55,35,15,0.82)',
+            'font-weight': '700',
+            'pointer-events': 'none',
+          });
+          t.textContent = String.fromCharCode(97 + row);
+          svg.appendChild(t);
+        }
+
+        for (let q = 0; q < g.size; q++) {
+          const baseCell = centerFor(q, g.size - 1 - q, layout);
+          const t = svgEl('text', {
+            x: baseCell.x,
+            y: baseCell.y + R * 1.28,
+            'text-anchor': 'middle',
+            'font-size': Math.max(12, R * 0.58),
+            'font-family': 'Helvetica, Arial, sans-serif',
+            fill: 'rgba(55,35,15,0.82)',
+            'font-weight': '700',
+            'pointer-events': 'none',
+          });
+          t.textContent = String(q + 1);
+          svg.appendChild(t);
+        }
+      }
+
+      function onCellClick(q, r) {
+        const g = state.game;
+        if (!g || state.ui.busy || state.ui.animating) return;
+        if (getControllerForPlayer(g.currentPlayer) !== 'human') return;
+        let action = null;
+        if (g.phase === 'opening') {
+          action = { kind: 'open', q, r, color: openingColorSelect.value };
+        } else if (g.phase === 'pie_decision' || g.phase === 'play') {
+          action = { kind: 'move', q, r };
+        }
+        if (action && applyAction(g, action)) {
+          render();
+          scheduleAIIfNeeded();
+        }
+      }
+
+      async function runAnimatedRandomPlayout() {
+        const g = state.game;
+        if (!g || g.phase === 'gameover' || state.ui.busy || state.ui.animating) return;
+        state.ui.animating = true;
+        state.ui.busy = true;
+        testBox.textContent = 'Running animated random playout...';
+        render();
+
+        try {
+          let steps = 0;
+          while (g.phase !== 'gameover' && steps < 1000) {
+            if (g.phase !== 'gameover' && g.phase !== 'opening' && g.phase !== 'pie_decision' && g.phase !== 'play') break;
+            const act = randomAction(g);
+            if (!act) break;
+            applyAction(g, act);
+            render();
+            steps++;
+            const delay = g.size <= 10 ? 90 : g.size <= 13 ? 65 : 40;
+            await new Promise(res => setTimeout(res, delay));
+          }
+          if (g.phase === 'gameover') {
+            testBox.textContent = `Animated playout complete: ${g.result.draw ? 'Draw' : `${playerName(g.result.winner)} win`} in ${g.result.pliesPlaced} placed stones.`;
+          } else {
+            testBox.textContent = 'Animated playout stopped unexpectedly (safety guard).';
+          }
+        } finally {
+          state.ui.animating = false;
+          state.ui.busy = false;
+          render();
+          scheduleAIIfNeeded();
+        }
+      }
+
+      async function runRandomTest100() {
+        if (state.ui.busy || state.ui.animating) return;
+        state.ui.busy = true;
+        render();
+
+        const size = Number(sizeSelect.value);
+        const results = [];
+        let p1Wins = 0, p2Wins = 0, draws = 0;
+        for (let i = 0; i < 100; i++) {
+          const sim = createInitialGame(size);
+          let guard = size * size * 6 + 500;
+          while (sim.phase !== 'gameover' && guard-- > 0) {
+            const act = randomAction(sim);
+            if (!act || !applyAction(sim, act)) break;
+          }
+          if (sim.phase !== 'gameover') finalizeIfTrapped(sim);
+          const plies = sim.result ? sim.result.pliesPlaced : sim.pliesPlaced;
+          results.push(plies);
+          if (sim.result) {
+            if (sim.result.draw) draws++;
+            else if (sim.result.winner === 0) p1Wins++;
+            else p2Wins++;
+          } else {
+            draws++;
+          }
+
+          if ((i + 1) % 10 === 0) {
+            testBox.textContent = `Testing random playouts: ${i + 1}/100 complete...`;
+            await new Promise(res => setTimeout(res, 0));
+          }
+        }
+        results.sort((a, b) => a - b);
+        const median = (results[49] + results[50]) / 2;
+        const avg = results.reduce((a, b) => a + b, 0) / results.length;
+        const totalGames = results.length || 1;
+        const p1Rate = (p1Wins / totalGames * 100).toFixed(1);
+        const p2Rate = (p2Wins / totalGames * 100).toFixed(1);
+        testBox.innerHTML = `Random test (100 playouts, size ${size})<br>` +
+          `Median length: <strong>${median}</strong> stones (avg ${avg.toFixed(1)})<br>` +
+          `Balance: P1 ${p1Rate}% | P2 ${p2Rate}% | Draws ${draws}`;
+
+        state.ui.busy = false;
+        render();
+      }
+
+      restartBtn.addEventListener('click', resetGame);
+      sizeSelect.addEventListener('change', resetGame);
+      opponentSelect.addEventListener('change', () => {
+        render();
+        scheduleAIIfNeeded();
+      });
+      openingColorSelect.addEventListener('change', render);
+      swapBtn.addEventListener('click', () => {
+        const g = state.game;
+        if (!g) return;
+        if (applyAction(g, { kind: 'swap' })) {
+          render();
+          scheduleAIIfNeeded();
+        }
+      });
+      playoutBtn.addEventListener('click', runAnimatedRandomPlayout);
+      testBtn.addEventListener('click', runRandomTest100);
+
+      resetGame();
+    })();
+  </script>
 </body>
 </html>
